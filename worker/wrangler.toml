@@ -9,7 +9,7 @@ database_id = "556dace4-8ed4-4dd4-86d8-41e5dc7ee660"
 
 [vars]
 # OAuth client ID from Google Cloud (it is public, not a secret). Tokens issued for any other client are refused.
-GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_ID = "48421767098-s12lbcksebhdo5hiano0u26edjugif7k.apps.googleusercontent.com"
 # Optional comma-separated list of Google emails allowed to use this server.
 # When empty, the first Google account that signs in becomes the owner and nobody else can.
 ALLOWED_EMAILS = ""

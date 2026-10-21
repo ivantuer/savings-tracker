@@ -23,7 +23,7 @@ export interface Env {
 
 const ORIGINS = ['https://ivantuer.github.io'];
 const MAX_BODY = 2_000_000;
-const MAX_VAULTS = 3;
+const MAX_VAULTS = 10;
 
 const cors = (req: Request): Record<string, string> => {
   const o = req.headers.get('Origin') ?? '';
@@ -97,15 +97,17 @@ export async function verifyGoogleToken(token: string, env: Env): Promise<Google
 }
 
 /**
- * Only allowed accounts may use the Google backup: the configured list, or else the account that first linked a vault.
+ * Who may use the Google backup: the configured list, or else the account that first linked a vault.
  * Only `claim` (linking, which needs the vault token) may take ownership, so a stranger cannot grab an unclaimed server.
+ * Returns 'unclaimed' when nobody owns the server yet, so a first sign-in can be told there is nothing to open.
  */
-async function mayUse(env: Env, who: GoogleIdentity, claim: boolean): Promise<boolean> {
+async function access(env: Env, who: GoogleIdentity, claim: boolean): Promise<'ok' | 'denied' | 'unclaimed'> {
   const list = (env.ALLOWED_EMAILS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  if (list.length) return list.includes(who.email);
+  if (list.length) return list.includes(who.email) ? 'ok' : 'denied';
   if (claim) await env.DB.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('owner_sub', ?)").bind(who.sub).run();
   const owner = await env.DB.prepare("SELECT value FROM meta WHERE key = 'owner_sub'").first<{ value: string }>();
-  return owner?.value === who.sub;
+  if (!owner) return 'unclaimed';
+  return owner.value === who.sub ? 'ok' : 'denied';
 }
 
 // ---- sealing (the Google link keeps vault credentials encrypted with a key from this server's database) -------
@@ -190,7 +192,9 @@ async function link(req: Request, env: Env, path: string): Promise<Response> {
   const who = body.idToken ? await verifyGoogleToken(body.idToken, env) : null;
   if (!who) return json(req, { error: 'Google sign-in could not be verified' }, 401);
   if (path === '/link' && !(await vaultProof(env, body))) return json(req, { error: 'not authorized for this vault' }, 401);
-  if (!(await mayUse(env, who, path === '/link'))) return json(req, { error: 'This server belongs to another Google account, or no backup has been set up yet' }, 403);
+  const allowed = await access(env, who, path === '/link');
+  if (allowed === 'denied') return json(req, { error: 'This server belongs to another Google account' }, 403);
+  if (allowed === 'unclaimed') return json(req, { error: 'No Google backup is set up yet' }, 404);
 
   if (path === '/link/open') {
     const row = await env.DB.prepare('SELECT vault_id, iv, sealed FROM links WHERE sub = ?').bind(who.sub).first<{ vault_id: string; iv: string; sealed: string }>();

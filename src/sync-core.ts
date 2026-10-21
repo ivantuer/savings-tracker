@@ -179,7 +179,20 @@ async function postJson<T>(url: string, path: string, body: unknown): Promise<T>
 export const linkGoogle = (v: Vault, idToken: string) =>
   postJson<{ email: string }>(v.url, '/link', { idToken, vaultId: v.path.replace('/v/', ''), token: v.bearer, masterKey: v.key });
 
-export const openLink = (url: string, idToken: string) => postJson<LinkInfo>(url, '/link/open', { idToken });
+/** The Google backup for this account, or null if none has been set up yet. */
+export async function openLink(url: string, idToken: string): Promise<LinkInfo | null> {
+  const res = await fetch(`${base(url)}/link/open`, { method: 'POST', body: JSON.stringify({ idToken }) });
+  if (res.status === 404) return null;
+  const j = (await res.json().catch(() => ({}))) as LinkInfo & { error?: string };
+  if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+  return j;
+}
+
+/** A brand-new vault with random credentials, for a device that starts with Google instead of a passkey. */
+export function newVault(url: string): Vault {
+  const r = (n: number) => crypto.getRandomValues(new Uint8Array(n));
+  return { url: base(url), path: `/v/${hex(r(16))}`, bearer: hex(r(32)), key: b64(r(32)) };
+}
 export const unlinkGoogle = (url: string, idToken: string) => postJson<{ ok: true }>(url, '/link/remove', { idToken });
 
 /** A device that signed in with Google receives the vault credentials directly. */

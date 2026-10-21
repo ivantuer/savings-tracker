@@ -94,7 +94,7 @@ function SyncCard() {
       const l = latest.current;
       localStorage.setItem('sync-url', l.url.trim());
       const st = syncState.value;
-      if (!st.connected) void connectGoogle(l.url, idToken);
+      if (!st.connected) void connectGoogle(l.url, idToken, () => confirm('No Google backup exists yet. Create a new synced vault from this device with this Google account?\n\nIf you already sync with a passkey on another device, cancel and turn on its Google backup there instead.'));
       else if (st.linked) void disableGoogleBackup(idToken);
       else void enableGoogleBackup(idToken);
     }).catch((e) => setGoogleError(e instanceof Error ? e.message : 'Google sign-in failed to load'));
@@ -163,8 +163,8 @@ function SyncCard() {
       {GOOGLE_CLIENT_ID && (
         <>
           <hr style="border:0;border-top:1px solid var(--grid);margin:16px 0" />
-          <p class="small" style="margin:0 0 6px"><b>Device without passkey support?</b></p>
-          <p class="muted small" style="margin:0 0 8px">Sign in with the Google account you set up as a backup from a passkey device.</p>
+          <p class="small" style="margin:0 0 6px"><b>Or continue with Google</b></p>
+          <p class="muted small" style="margin:0 0 8px">Works on any device, including ones without passkey support. Your sync server keeps the key sealed so this Google account can open your data, which means the server can read it. A passkey keeps it private.</p>
           {googleReady && <div ref={button} style="margin-top:10px" />}
         </>
       )}

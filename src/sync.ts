@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import { del, get, set } from 'idb-keyval';
 import { applySynced, hooks, state } from './store';
-import { canon, linkGoogle, openLink, openWithLink, openWithPasskey, syncOnce, unlinkGoogle, type SyncData, type Vault } from './sync-core';
+import { canon, linkGoogle, newVault, openLink, openWithLink, openWithPasskey, syncOnce, unlinkGoogle, type SyncData, type Vault } from './sync-core';
 import { createPasskey, passkeySecret } from './passkey';
 
 const KEY = 'savings-tracker-sync-v2';
@@ -95,16 +95,38 @@ export async function connectPasskey(url: string, createNew: boolean): Promise<v
   }
 }
 
-/** A device without passkey support: sign in with Google to receive the vault credentials. */
-export async function connectGoogle(url: string, idToken: string): Promise<void> {
+/**
+ * Continue with Google, on any device. If a Google backup exists, open it. Otherwise (after `confirmCreate`) create a new
+ * vault from this device's data and link it to the Google account, so every other device can sign in to it.
+ */
+export async function connectGoogle(url: string, idToken: string, confirmCreate: () => boolean): Promise<void> {
   patch({ busy: true, error: '' });
   try {
     checkUrl(url);
     const info = await openLink(url.trim(), idToken);
-    await finishConnect({ vault: openWithLink(url.trim(), info), kind: 'google', linked: true, email: info.email });
+    if (info) {
+      await finishConnect({ vault: openWithLink(url.trim(), info), kind: 'google', linked: true, email: info.email });
+      return;
+    }
+    if (!confirmCreate()) {
+      patch({ busy: false });
+      return;
+    }
+    // New vault: upload this device's data first, then let the Google account open it.
+    const vault = newVault(url.trim());
+    saved = { vault, kind: 'google', linked: false };
+    patch({ connected: true, busy: false, url: vault.url, kind: 'google', linked: false });
+    await syncNow();
+    if (syncState.value.error) throw new Error(syncState.value.error);
+    patch({ busy: true });
+    const { email } = await linkGoogle(vault, idToken);
+    saved = { ...saved, linked: true, email };
+    await set(KEY, saved);
+    patch({ busy: false, linked: true, email });
   } catch (e) {
-    saved = null;
-    patch({ connected: false, busy: false, error: message(e, 'Could not connect') });
+    const msg = message(e, 'Could not connect');
+    await disconnect();
+    patch({ error: msg });
   }
 }
 
