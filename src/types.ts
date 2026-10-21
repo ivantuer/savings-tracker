@@ -75,6 +75,7 @@ export interface Settings {
   hideBalances: boolean;
   /** which UAH/USD rate converts hryvnia: NBU official, or market (Binance USDT/UAH) */
   uahRate: 'nbu' | 'market';
+  theme: 'auto' | 'light' | 'dark';
 }
 
 export interface AppState {

@@ -25,6 +25,15 @@ export function SettingsView() {
   return (
     <>
       <div class="card">
+        <h2>Theme</h2>
+        <div class="seg">
+          {(['auto', 'light', 'dark'] as const).map((t) => (
+            <button class={s.settings.theme === t ? 'on' : ''} onClick={() => setSettings({ theme: t })}>{t[0].toUpperCase() + t.slice(1)}</button>
+          ))}
+        </div>
+        <p class="muted small" style="margin-bottom:0">Auto follows your phone's light or dark setting.</p>
+      </div>
+      <div class="card">
         <h2>UAH → USD rate</h2>
         <p class="muted small">Which rate converts hryvnia holdings into USD and USDT. Official is the NBU rate (₴{s.rates.usdUah.toFixed(2)}); market uses USDT/UAH on Binance (₴{s.rates.usdtUah.toFixed(2)}).</p>
         <div class="seg">

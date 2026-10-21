@@ -11,7 +11,7 @@ const empty = (): AppState => ({
   wallets: [],
   positions: [],
   snapshots: [],
-  settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market' },
+  settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market', theme: 'auto' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
 });
@@ -27,6 +27,7 @@ const update = (fn: (s: AppState) => AppState) => (state.value = fn(state.value)
 export async function init() {
   const saved = await get<AppState>(KEY);
   if (saved) state.value = { ...empty(), ...saved, settings: { ...empty().settings, ...saved.settings } };
+  applyTheme(state.value.settings.theme);
   ready.value = true;
   effect(() => {
     if (ready.value) void set(KEY, JSON.parse(JSON.stringify(state.value)));
@@ -67,8 +68,14 @@ export function saveSnapshot() {
 
 export const setDisplay = (display: AppState['settings']['display']) =>
   update((s) => ({ ...s, settings: { ...s.settings, display } }));
-export const setSettings = (patch: Partial<AppState['settings']>) =>
+export const applyTheme = (theme: AppState['settings']['theme']) => {
+  if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = theme;
+};
+export const setSettings = (patch: Partial<AppState['settings']>) => {
   update((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+  if (patch.theme) applyTheme(patch.theme);
+};
 
 export const upsertWallet = (w: Wallet) =>
   update((s) => ({ ...s, wallets: s.wallets.some((x) => x.id === w.id) ? s.wallets.map((x) => (x.id === w.id ? w : x)) : [...s.wallets, w] }));
