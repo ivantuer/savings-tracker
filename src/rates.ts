@@ -1,7 +1,14 @@
 import type { AppState, BondQuote, Prices, Rates } from './types';
 
 const j = async <T>(url: string, retry = true): Promise<T> => {
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    if (!retry) throw e;
+    await new Promise((r) => setTimeout(r, 2500));
+    return j<T>(url, false);
+  }
   if (res.status === 429 && retry) {
     await new Promise((r) => setTimeout(r, 2500));
     return j<T>(url, false);
@@ -10,22 +17,36 @@ const j = async <T>(url: string, retry = true): Promise<T> => {
   return res.json();
 };
 
+/** Failures of the latest refresh, shown on the Prices tab. */
+export const fetchLog: string[] = [];
+const fail = (what: string, e: unknown): void => { fetchLog.push(`${what}: ${e instanceof Error ? e.message : 'failed'}`); };
+
 export const DEFAULT_RATES: Rates = { usdUah: 41.5, eurUah: 48, usdtUah: 41.6, usdtUsd: 1 };
 
 export async function fetchRates(prev: Rates): Promise<Rates> {
   const next: Rates = { ...prev };
-  const [nbu, binance, tether] = await Promise.allSettled([
+  // Monobank allows one request per 5 minutes per IP, so reuse a fresh quote.
+  const monoFresh = prev.mono && Date.now() - new Date(prev.mono.at).getTime() < 5 * 60_000;
+  const [nbu, mono, tether] = await Promise.allSettled([
     j<{ cc: string; rate: number }[]>('https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json'),
-    j<{ price: string }>('https://api.binance.com/api/v3/ticker/price?symbol=USDTUAH'),
+    monoFresh ? Promise.resolve(null) : j<{ currencyCodeA: number; currencyCodeB: number; rateBuy?: number; rateSell?: number }[]>('https://api.monobank.ua/bank/currency', false),
     j<{ tether: { usd: number } }>('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd'),
   ]);
+  if (nbu.status === 'rejected') fail('NBU rates', nbu.reason);
+  if (mono.status === 'rejected') fail('Monobank rates', mono.reason);
+  if (tether.status === 'rejected') fail('CoinGecko USDT', tether.reason);
   if (nbu.status === 'fulfilled') {
     next.usdUah = nbu.value.find((r) => r.cc === 'USD')?.rate ?? next.usdUah;
     next.eurUah = nbu.value.find((r) => r.cc === 'EUR')?.rate ?? next.eurUah;
   }
+  if (mono.status === 'fulfilled' && mono.value) {
+    const pair = (a: number) => mono.value!.find((r) => r.currencyCodeA === a && r.currencyCodeB === 980);
+    const usd = pair(840), eur = pair(978);
+    if (usd?.rateBuy && usd.rateSell && eur?.rateBuy && eur.rateSell)
+      next.mono = { usdBuy: usd.rateBuy, usdSell: usd.rateSell, eurBuy: eur.rateBuy, eurSell: eur.rateSell, at: new Date().toISOString() };
+  }
   if (tether.status === 'fulfilled') next.usdtUsd = tether.value.tether?.usd ?? next.usdtUsd;
-  next.usdtUah =
-    binance.status === 'fulfilled' ? Number(binance.value.price) : next.usdUah * next.usdtUsd;
+  next.usdtUah = next.usdUah * next.usdtUsd;
   next.fetchedAt = new Date().toISOString();
   return next;
 }
@@ -133,7 +154,7 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
         `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`,
       ).then((r) => {
         for (const id of ids) if (r[id]?.usd != null) next.crypto[id] = r[id].usd;
-      }),
+      }, (e) => fail('CoinGecko prices', e)),
     );
   }
   if (s.settings.finnhubKey) {
@@ -148,10 +169,10 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
     }
   }
   if (s.positions.some((p) => p.type === 'manual' && p.symbol)) {
-    tasks.push(fetchInzhur().then((r) => { Object.assign(next.inzhur!, r); }));
+    tasks.push(fetchInzhur().then((r) => { Object.assign(next.inzhur!, r); }, (e) => fail('Inzhur funds', e)));
   }
   if (s.positions.some((p) => p.type === 'bond' && p.bond?.isin)) {
-    tasks.push(fetchBondQuotes().then((r) => { Object.assign(next.bonds!, r); }));
+    tasks.push(fetchBondQuotes().then((r) => { Object.assign(next.bonds!, r); }, (e) => fail('ОВДП prices', e)));
   }
   await Promise.allSettled(tasks);
   next.fetchedAt = new Date().toISOString();

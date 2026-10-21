@@ -2,9 +2,15 @@ import type { AppState, Category, Display, Fiat, Position, Rates, Snapshot, Wall
 
 type Cur = Fiat | 'USDT';
 
-/** Rates used for conversion; 'market' prices hryvnia through USDT/UAH on Binance instead of the NBU rate. */
-export const ratesOf = (s: AppState): Rates =>
-  s.settings.uahRate === 'market' ? { ...s.rates, usdUah: s.rates.usdtUah / s.rates.usdtUsd } : s.rates;
+/** Monobank mid-rate (between its buy and sell quotes), UAH per USD / EUR. */
+export const monoMid = (s: AppState) => s.rates.mono && { usd: (s.rates.mono.usdBuy + s.rates.mono.usdSell) / 2, eur: (s.rates.mono.eurBuy + s.rates.mono.eurSell) / 2 };
+
+/** Rates used for conversion: the Monobank market rate by default, or the official NBU rate. USDT follows USD. */
+export const ratesOf = (s: AppState): Rates => {
+  const m = s.settings.uahRate === 'market' ? monoMid(s) : undefined;
+  const usdUah = m?.usd ?? s.rates.usdUah;
+  return { ...s.rates, usdUah, eurUah: m?.eur ?? s.rates.eurUah, usdtUah: usdUah * s.rates.usdtUsd };
+};
 
 const usdPer = (cur: Cur, r: Rates): number => {
   switch (cur) {

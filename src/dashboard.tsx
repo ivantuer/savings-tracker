@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { state, refreshError } from './store';
 import { CATEGORIES, categoryColor, type Display } from './types';
-import { RANGES, categoryTotals, convert, creditRows, daysAgo, exposure, fmt, fmtCompact, historyRows, holdings, netWorth, periodChange, pnlSummary, ratesOf, snapshotsIn, walletTotal, type Range } from './calc';
+import { RANGES, monoMid, categoryTotals, convert, creditRows, daysAgo, exposure, fmt, fmtCompact, historyRows, holdings, netWorth, periodChange, pnlSummary, ratesOf, snapshotsIn, walletTotal, type Range } from './calc';
 import { Bars, Donut, StackBar, StackedArea } from './charts';
 import { downloadSellReminder } from './ics';
 
@@ -53,7 +53,7 @@ export function Dashboard({ goWallet }: { goWallet: (id: string) => void }) {
           {OTHERS[d].map((o) => fmt(convert(total, d, o, r), o)).join(' · ')}
         </div>
         <div class="muted small" style="margin-top:2px">
-          1 USD = ₴{r.usdUah.toFixed(2)} ({s.settings.uahRate === 'market' ? 'market' : 'NBU'}) · 1 USDT = ₴{s.rates.usdtUah.toFixed(2)}
+          1 USD = ₴{r.usdUah.toFixed(2)} ({s.settings.uahRate === 'market' && monoMid(s) ? 'Monobank' : 'NBU'}) · 1 USDT = ₴{r.usdtUah.toFixed(2)}
           {ageDays != null && ageDays > 0 && <span class="stale"> · prices {ageDays}d old</span>}
         </div>
         {refreshError.value && <div class="err">Some prices failed to refresh; showing the last known ones.</div>}

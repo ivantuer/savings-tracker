@@ -1,5 +1,6 @@
 import { useRef, useState } from 'preact/hooks';
 import { exportJson, importJson, setSettings, state } from './store';
+import { monoMid } from './calc';
 
 export function SettingsView() {
   const s = state.value;
@@ -35,10 +36,10 @@ export function SettingsView() {
       </div>
       <div class="card">
         <h2>UAH → USD rate</h2>
-        <p class="muted small">Which rate converts hryvnia holdings into USD and USDT. Official is the NBU rate (₴{s.rates.usdUah.toFixed(2)}); market uses USDT/UAH on Binance (₴{s.rates.usdtUah.toFixed(2)}).</p>
+        <p class="muted small">Which rate converts hryvnia holdings into USD and USDT. {s.rates.fetchedAt ? `Market is the Monobank rate${monoMid(s) ? ` (₴${monoMid(s)!.usd.toFixed(2)}, between its buy ${s.rates.mono!.usdBuy} and sell ${s.rates.mono!.usdSell})` : ''}. Official is the NBU rate (₴${s.rates.usdUah.toFixed(2)}).` : 'Live rates have not loaded yet. Check your connection and tap ↻.'}</p>
         <div class="seg">
           <button class={s.settings.uahRate === 'nbu' ? 'on' : ''} onClick={() => setSettings({ uahRate: 'nbu' })}>NBU official</button>
-          <button class={s.settings.uahRate === 'market' ? 'on' : ''} onClick={() => setSettings({ uahRate: 'market' })}>Market (Binance)</button>
+          <button class={s.settings.uahRate === 'market' ? 'on' : ''} onClick={() => setSettings({ uahRate: 'market' })}>Market (Monobank)</button>
         </div>
       </div>
       <div class="card">

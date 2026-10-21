@@ -1,7 +1,7 @@
 import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
 import type { AppState, Position, Wallet } from './types';
-import { DEFAULT_RATES, fetchPrices, fetchRates } from './rates';
+import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
 import { takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
@@ -44,6 +44,7 @@ export async function init() {
 export async function refresh() {
   refreshing.value = true;
   refreshError.value = '';
+  fetchLog.length = 0;
   try {
     const rates = await fetchRates(state.value.rates);
     update((s) => ({ ...s, rates }));
@@ -52,6 +53,7 @@ export async function refresh() {
   } catch (e) {
     refreshError.value = e instanceof Error ? e.message : 'Refresh failed';
   } finally {
+    if (fetchLog.length) refreshError.value = fetchLog.join('; ');
     saveSnapshot();
     refreshing.value = false;
   }
@@ -106,4 +108,5 @@ export function importJson(text: string) {
   const data = JSON.parse(text) as AppState;
   if (!Array.isArray(data.wallets) || !Array.isArray(data.positions)) throw new Error('Not a Savings Tracker backup');
   state.value = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
+  void refresh();
 }

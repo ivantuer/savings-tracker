@@ -50,8 +50,10 @@ export interface Rates {
   usdUah: number;
   /** UAH per 1 EUR (NBU) */
   eurUah: number;
-  /** UAH per 1 USDT (Binance, falls back to NBU) */
+  /** UAH per 1 USDT (derived from the chosen USD rate; kept for old backups) */
   usdtUah: number;
+  /** Monobank cash rates, UAH per unit; fetched at most every 5 minutes (its API limit) */
+  mono?: { usdBuy: number; usdSell: number; eurBuy: number; eurSell: number; at: string };
   /** USD per 1 USDT */
   usdtUsd: number;
   fetchedAt?: string;

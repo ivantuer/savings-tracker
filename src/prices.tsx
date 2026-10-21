@@ -26,19 +26,24 @@ export function PricesView() {
           </div>
           <button class="primary" disabled={refreshing.value} onClick={() => void refresh()}>{refreshing.value ? 'Updating…' : 'Refresh'}</button>
         </div>
-        {refreshError.value && <div class="err" style="margin-top:8px">Some sources failed. The last known prices are shown.</div>}
+        {refreshError.value && <div class="err" style="margin-top:8px">Could not update: {refreshError.value}. Showing the last known prices.</div>}
         {missing.length > 0 && <div class="err" style="margin-top:8px">No price for: {missing.map((p) => p.symbol ?? p.name).join(', ')}</div>}
       </div>
 
       <div class="card">
         <h2>Exchange rates</h2>
         <table class="prices"><tbody>
+          {s.rates.mono && (
+            <>
+              <tr><td>USD → UAH<div class="muted small">Monobank, buy / sell</div></td><td class="num">₴{s.rates.mono.usdBuy} / {s.rates.mono.usdSell}</td></tr>
+              <tr><td>EUR → UAH<div class="muted small">Monobank, buy / sell</div></td><td class="num">₴{s.rates.mono.eurBuy} / {s.rates.mono.eurSell}</td></tr>
+            </>
+          )}
           <tr><td>USD → UAH<div class="muted small">NBU, official</div></td><td class="num">₴{s.rates.usdUah.toFixed(2)}</td></tr>
           <tr><td>EUR → UAH<div class="muted small">NBU, official</div></td><td class="num">₴{s.rates.eurUah.toFixed(2)}</td></tr>
-          <tr><td>USDT → UAH<div class="muted small">Binance market</div></td><td class="num">₴{s.rates.usdtUah.toFixed(2)}</td></tr>
           <tr><td>USDT → USD<div class="muted small">CoinGecko</div></td><td class="num">${s.rates.usdtUsd.toFixed(4)}</td></tr>
         </tbody></table>
-        <div class="muted small" style="margin-top:6px">Rates fetched {ago(s.rates.fetchedAt)}</div>
+        <div class="muted small" style="margin-top:6px">Conversions use the mid-rate between Monobank's buy and sell (set in Settings). Rates fetched {ago(s.rates.fetchedAt)}</div>
       </div>
 
       {coins.length > 0 && (
