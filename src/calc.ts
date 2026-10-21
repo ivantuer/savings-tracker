@@ -19,13 +19,19 @@ export function convert(amount: number, from: Cur, to: Cur, r: Rates): number {
   return (amount * usdPer(from, r)) / usdPer(to, r);
 }
 
+/** Price of one certificate: live Inzhur price when the position is linked to a fund, else the manual one. */
+export function unitPriceOf(p: Position, s: AppState): number | undefined {
+  const live = p.type === 'manual' && p.symbol ? s.prices.inzhur?.[p.symbol.toUpperCase()] : undefined;
+  return live ?? p.unitPrice;
+}
+
 /** Value of a position in its native currency, or null when no price is available. */
 export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cur } | null {
   switch (p.type) {
     case 'fiat':
       return { amount: p.quantity, cur: p.currency ?? 'UAH' };
     case 'manual':
-      return { amount: p.quantity * (p.unitPrice ?? 1), cur: p.currency ?? 'UAH' };
+      return { amount: p.quantity * (unitPriceOf(p, s) ?? 1), cur: p.currency ?? 'UAH' };
     case 'bond':
       return { amount: p.quantity * (p.bond?.unitValue ?? p.bond?.face ?? 0), cur: p.currency ?? 'UAH' };
     case 'crypto': {

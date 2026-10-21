@@ -14,7 +14,7 @@ export interface Position {
   walletId: string;
   type: PositionType;
   name: string;
-  /** crypto: ticker; stock: ticker; others: unused */
+  /** crypto: ticker; stock: ticker; manual: Inzhur fund key (REIT, MILTECH, ENERGY) for live price */
   symbol?: string;
   /** crypto: CoinGecko id */
   coingeckoId?: string;
@@ -58,6 +58,8 @@ export interface Rates {
 export interface Prices {
   crypto: Record<string, number>; // coingeckoId -> USD
   stocks: Record<string, number>; // ticker -> USD
+  /** Inzhur fund key (REIT, MILTECH, ENERGY) -> UAH per certificate */
+  inzhur?: Record<string, number>;
   fetchedAt?: string;
 }
 

@@ -26,8 +26,36 @@ export async function fetchRates(prev: Rates): Promise<Rates> {
   return next;
 }
 
+export const INZHUR_FUNDS = [
+  { key: 'REIT', match: 'inzhur reit' },
+  { key: 'MILTECH', match: 'inzhur miltech' },
+  { key: 'ENERGY', match: 'inzhur energy' },
+] as const;
+
+/**
+ * Reads the "current purchase price of 1 certificate" for each fund from the public inzhur.reit page
+ * (the site allows cross-origin reads). Each price is attached to the fund name that precedes it.
+ */
+export function parseInzhurPrices(html: string): Record<string, number> {
+  const text = html.replace(/&quot;/g, '"');
+  const names = [...text.matchAll(/"name":\[0,"(Inzhur [^"]+)"\]/g)].map((m) => ({ at: m.index!, name: m[1].toLowerCase() }));
+  const out: Record<string, number> = {};
+  for (const m of text.matchAll(/"value":\[0,"([\d.]+)"\],"dynamicValue":\[0,"initialInvestment"/g)) {
+    const owner = names.filter((n) => n.at < m.index!).at(-1);
+    const fund = INZHUR_FUNDS.find((f) => owner?.name === f.match);
+    if (fund && !(fund.key in out)) out[fund.key] = Number(m[1]);
+  }
+  return out;
+}
+
+async function fetchInzhur(): Promise<Record<string, number>> {
+  const res = await fetch('https://www.inzhur.reit/');
+  if (!res.ok) throw new Error(`inzhur ${res.status}`);
+  return parseInzhurPrices(await res.text());
+}
+
 export async function fetchPrices(s: AppState): Promise<Prices> {
-  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks } };
+  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks }, inzhur: { ...s.prices.inzhur } };
   const ids = [...new Set(s.positions.filter((p) => p.type === 'crypto' && p.coingeckoId).map((p) => p.coingeckoId!))];
   const tickers = [...new Set(s.positions.filter((p) => p.type === 'stock' && p.symbol).map((p) => p.symbol!.toUpperCase()))];
 
@@ -51,6 +79,9 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
         }),
       );
     }
+  }
+  if (s.positions.some((p) => p.type === 'manual' && p.symbol)) {
+    tasks.push(fetchInzhur().then((r) => { Object.assign(next.inzhur!, r); }));
   }
   await Promise.allSettled(tasks);
   next.fetchedAt = new Date().toISOString();

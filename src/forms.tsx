@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
 import { deleteWallet, deletePosition, uid, upsertPosition, upsertWallet } from './store';
-import { QUICK_COINS, searchCoins, type CoinHit } from './rates';
+import { INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
   return (
@@ -53,6 +53,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [qty, setQty] = useState(position ? String(position.quantity) : '');
   const [cur, setCur] = useState<Fiat>(position?.currency ?? 'UAH');
   const [cost, setCost] = useState(position?.costBasis != null ? String(position.costBasis) : '');
+  const [fund, setFund] = useState(position?.symbol ?? '');
   const [unitPrice, setUnitPrice] = useState(position?.unitPrice != null ? String(position.unitPrice) : '');
   const [manualPrice, setManualPrice] = useState(position?.manualPrice != null ? String(position.manualPrice) : '');
   const [face, setFace] = useState(String(position?.bond?.face ?? 1000));
@@ -83,7 +84,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       walletId: wallet.id,
       type,
       name: (name || symbol).trim(),
-      symbol: symbol.trim().toUpperCase() || undefined,
+      symbol: (type === 'manual' ? fund : symbol.trim().toUpperCase()) || undefined,
       coingeckoId: coinId || undefined,
       quantity: quantity!,
       currency: type === 'crypto' || type === 'stock' ? undefined : cur,
@@ -133,7 +134,12 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       <input inputMode="decimal" value={qty} onInput={(e) => setQty(e.currentTarget.value)} />
       {type === 'manual' && (
         <>
-          <label>Current price per certificate in {cur} (blank = amount above is the total value)</label>
+          <label>Live price from inzhur.reit</label>
+          <select value={fund} onChange={(e) => setFund(e.currentTarget.value)}>
+            <option value="">None (enter price manually)</option>
+            {INZHUR_FUNDS.map((f) => <option value={f.key}>{f.key === 'REIT' ? 'Inzhur REIT' : f.key === 'MILTECH' ? 'Inzhur MilTech' : 'Inzhur Energy'}</option>)}
+          </select>
+          <label>{fund ? 'Fallback price' : 'Price'} per certificate in {cur} (blank = amount above is the total value)</label>
           <input inputMode="decimal" value={unitPrice} onInput={(e) => setUnitPrice(e.currentTarget.value)} />
         </>
       )}
