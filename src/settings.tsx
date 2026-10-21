@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportJson, importJson, setSettings, state } from './store';
 import { monoMid } from './calc';
-import { connect, connectGoogle, disconnect, generatePassphrase, relogin, syncNow, syncState } from './sync';
+import { connectGoogle, connectPasskey, disableGoogleBackup, disconnect, enableGoogleBackup, syncNow, syncState } from './sync';
+import { passkeysAvailable } from './passkey';
 import { renderGoogleButton } from './google';
 import { GOOGLE_CLIENT_ID, SYNC_URL } from './config';
 
@@ -72,33 +73,31 @@ export function SettingsView() {
 
 function SyncCard() {
   const sync = syncState.value;
-  const [mode, setMode] = useState<'google' | 'passphrase'>('google');
   const [url, setUrl] = useState(SYNC_URL || localStorage.getItem('sync-url') || '');
   const [clientId, setClientId] = useState(GOOGLE_CLIENT_ID || localStorage.getItem('google-client-id') || '');
-  const [pass, setPass] = useState('');
   const [googleError, setGoogleError] = useState('');
   const button = useRef<HTMLDivElement>(null);
-  const latest = useRef({ url, clientId, pass });
-  latest.current = { url, clientId, pass };
+  const latest = useRef({ url, clientId });
+  latest.current = { url, clientId };
 
-  const ready = /^https:\/\/|^http:\/\/localhost/.test(url.trim()) && clientId.trim().length > 10 && pass.trim().length >= 12;
-  const showButton = sync.connected ? sync.needsLogin : mode === 'google' && ready;
-  const buttonClient = sync.connected ? sync.clientId ?? clientId : clientId;
+  const urlOk = /^https:\/\/|^http:\/\/localhost/.test(url.trim());
+  const googleReady = urlOk && clientId.trim().length > 10;
+  // The Google button is used to connect a device without a passkey, or to add the Google backup from a passkey device.
+  const wantButton = sync.connected ? sync.kind === 'passkey' : googleReady;
 
-  // The official Google button, shown once there is something to sign in to.
   useEffect(() => {
-    if (!showButton || !button.current) return;
+    if (!wantButton || !button.current) return;
     setGoogleError('');
-    renderGoogleButton(button.current, buttonClient.trim(), (idToken) => {
+    renderGoogleButton(button.current, clientId.trim(), (idToken) => {
       const l = latest.current;
-      if (syncState.value.connected) void relogin(idToken);
-      else {
-        localStorage.setItem('sync-url', l.url.trim());
-        localStorage.setItem('google-client-id', l.clientId.trim());
-        void connectGoogle(l.url, l.clientId.trim(), l.pass, idToken);
-      }
+      localStorage.setItem('sync-url', l.url.trim());
+      localStorage.setItem('google-client-id', l.clientId.trim());
+      const st = syncState.value;
+      if (!st.connected) void connectGoogle(l.url, idToken);
+      else if (st.linked) void disableGoogleBackup(idToken);
+      else void enableGoogleBackup(idToken);
     }).catch((e) => setGoogleError(e instanceof Error ? e.message : 'Google sign-in failed to load'));
-  }, [showButton, buttonClient, sync.connected]);
+  }, [wantButton, clientId, sync.connected, sync.linked]);
 
   if (sync.connected)
     return (
@@ -108,57 +107,62 @@ function SyncCard() {
           <b class={sync.error ? 'neg' : 'pos'}>{sync.busy ? 'Syncing…' : sync.error ? 'Not synced' : 'Connected'}</b>
           <span class="muted"> · {sync.lastSync ? `last synced ${new Date(sync.lastSync).toLocaleString()}` : 'not synced yet'}</span>
         </p>
-        {sync.mode === 'google' && sync.email && <p class="small" style="margin:0 0 6px">Signed in as <b>{sync.email}</b></p>}
+        <p class="small" style="margin:0 0 6px">Unlocked with {sync.kind === 'passkey' ? 'your passkey' : <>Google{sync.email ? <> (<b>{sync.email}</b>)</> : null}</>}</p>
         {sync.error && <p class="err">{sync.error}</p>}
-        {sync.needsLogin && <div ref={button} style="margin:8px 0" />}
+        {sync.kind === 'passkey' && (
+          <>
+            <p class="small" style="margin:12px 0 4px"><b>Google backup: {sync.linked ? `on${sync.email ? ` (${sync.email})` : ''}` : 'off'}</b></p>
+            <p class="muted small" style="margin:0 0 8px">
+              {sync.linked
+                ? 'A device without passkey support can sign in with this Google account to open your data. While this is on, your sync server holds the key sealed, so it can read your data. Sign in below with the same account to turn it off.'
+                : 'Lets a device without passkey support open your data by signing in with Google. The server then keeps your key sealed, so it can read your data. Off by default.'}
+            </p>
+            {googleReady ? <div ref={button} /> : <p class="muted small">Needs the Google client ID to be set up.</p>}
+          </>
+        )}
         {googleError && <p class="err">{googleError}</p>}
         <p class="muted small">Your data is encrypted on this device before it is sent. Server: {sync.url}</p>
         <div class="actions" style="margin-top:8px">
-          <button class="ghost" disabled={sync.busy || sync.needsLogin} onClick={() => void syncNow()}>Sync now</button>
+          <button class="ghost" disabled={sync.busy} onClick={() => void syncNow()}>Sync now</button>
           <button class="danger" onClick={() => { if (confirm('Stop syncing on this device? Your data here stays.')) void disconnect(); }}>Disconnect</button>
         </div>
       </div>
     );
 
+  const canPasskey = passkeysAvailable();
   return (
     <div class="card">
       <h2>Sync across devices</h2>
       <p class="muted small" style="margin-top:0">
-        Keeps your wallets and positions in step across devices. Everything is encrypted on the device with your passphrase before it is sent, so the server only stores scrambled data. A forgotten passphrase cannot be recovered.
+        Keeps your wallets and positions in step across devices. Your data is encrypted on the device before it is sent. A passkey (Face ID or Touch ID) unlocks it, with no password to remember.
       </p>
-      <div class="seg small">
-        <button class={mode === 'google' ? 'on' : ''} onClick={() => setMode('google')}>Google + passphrase</button>
-        <button class={mode === 'passphrase' ? 'on' : ''} onClick={() => setMode('passphrase')}>Passphrase only</button>
-      </div>
       {!SYNC_URL && (
         <>
           <label>Sync server address</label>
           <input value={url} placeholder="https://savings-sync.your-name.workers.dev" autocomplete="off" autocapitalize="off" onInput={(e) => setUrl(e.currentTarget.value)} />
         </>
       )}
-      {mode === 'google' && !GOOGLE_CLIENT_ID && (
+      {sync.error && <p class="err">{sync.error}</p>}
+      <div class="actions" style="flex-wrap:wrap">
+        <button class="primary" disabled={sync.busy || !urlOk || !canPasskey} onClick={() => { localStorage.setItem('sync-url', url.trim()); void connectPasskey(url, true); }}>
+          {sync.busy ? 'Connecting…' : 'Set up with a passkey'}
+        </button>
+        <button class="ghost" disabled={sync.busy || !urlOk || !canPasskey} onClick={() => { localStorage.setItem('sync-url', url.trim()); void connectPasskey(url, false); }}>Use my passkey</button>
+      </div>
+      <p class="muted small" style="margin-bottom:0">
+        {canPasskey ? 'First device: Set up. Your other devices: Use my passkey (it arrives through iCloud Keychain or Google Password Manager).' : 'This browser does not support passkeys.'}
+      </p>
+      <hr style="border:0;border-top:1px solid var(--grid);margin:16px 0" />
+      <p class="small" style="margin:0 0 6px"><b>Device without passkey support?</b></p>
+      <p class="muted small" style="margin:0 0 8px">Sign in with the Google account you set up as a backup from a passkey device.</p>
+      {!GOOGLE_CLIENT_ID && (
         <>
           <label>Google OAuth client ID</label>
           <input value={clientId} placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" onInput={(e) => setClientId(e.currentTarget.value)} />
         </>
       )}
-      <label>Encryption passphrase (12+ characters, same on every device)</label>
-      <input value={pass} autocomplete="off" autocapitalize="off" spellcheck={false} onInput={(e) => setPass(e.currentTarget.value)} />
-      <div class="chips">
-        <button class="chip" onClick={() => setPass(generatePassphrase())}>Generate a strong one (save it somewhere safe)</button>
-      </div>
-      {sync.error && <p class="err">{sync.error}</p>}
+      {googleReady ? <div ref={button} style="margin-top:10px" /> : <p class="muted small">{GOOGLE_CLIENT_ID ? 'Enter the server address first.' : 'Enter the server address and client ID to show the Google button.'}</p>}
       {googleError && <p class="err">{googleError}</p>}
-      {mode === 'google' ? (
-        <div style="margin-top:16px">
-          {ready ? <div ref={button} /> : <p class="muted small" style="margin:0">{SYNC_URL && GOOGLE_CLIENT_ID ? 'Enter a passphrase (12+ characters) and the Google button appears here.' : 'Fill in the fields above and the Google button appears here.'}</p>}
-          {sync.busy && <p class="muted small">Connecting…</p>}
-        </div>
-      ) : (
-        <div class="actions">
-          <button class="primary" disabled={sync.busy || !url || !pass} onClick={() => { localStorage.setItem('sync-url', url.trim()); void connect(url, pass); }}>{sync.busy ? 'Connecting…' : 'Connect'}</button>
-        </div>
-      )}
     </div>
   );
 }

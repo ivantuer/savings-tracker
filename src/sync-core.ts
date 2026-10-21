@@ -8,13 +8,17 @@ export interface SyncData {
   tombstones: Record<string, string>;
 }
 
-/**
- * What a device keeps after connecting. The passphrase itself is never stored.
- * `bearer` is a passphrase-derived token (passphrase-only mode) or a session issued after Google sign-in.
- */
-export interface Vault { url: string; path: string; bearer: string; key: string; mode: 'passphrase' | 'google' }
+/** The data key (`key`), encrypted under the passkey-derived key, so another device with the same passkey can open the vault. */
+export interface Wrap { iv: string; ct: string }
 
-/** The server no longer accepts this device's credentials. In Google mode that means signing in again. */
+/**
+ * What a device keeps after connecting.
+ * `key` is a random master key that encrypts the data. Passkey devices also hold `wrapKey` (derived from the passkey)
+ * and store the master key on the server wrapped with it; Google-backup devices receive the master key directly.
+ */
+export interface Vault { url: string; path: string; bearer: string; key: string; wrap?: Wrap; wrapKey?: string }
+
+/** The server no longer accepts this device's credentials for the vault. */
 export class SyncAuthError extends Error {}
 
 const te = new TextEncoder();
@@ -22,57 +26,44 @@ const td = new TextDecoder();
 const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const base = (url: string) => url.replace(/\/+$/, '');
 
-/** One slow key derivation yields three independent values: the vault id, the server auth token, and the AES key. */
-export async function deriveVault(url: string, passphrase: string): Promise<Vault> {
-  const base = await crypto.subtle.importKey('raw', te.encode(passphrase.trim()), 'PBKDF2', false, ['deriveBits']);
-  const bits = new Uint8Array(
-    await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: te.encode('savings-tracker/v1'), iterations: 310_000 }, base, 640),
-  );
-  return { url: url.replace(/\/+$/, ''), path: `/v/${hex(bits.slice(64, 80))}`, bearer: hex(bits.slice(0, 32)), key: b64(bits.slice(32, 64)), mode: 'passphrase' };
+/** From the passkey's PRF secret, derive three independent values: the vault id, the server token, and the wrapping key. */
+export async function deriveFromSecret(secret: ArrayBuffer | Uint8Array): Promise<{ id: string; token: string; wrapKey: string }> {
+  const k = await crypto.subtle.importKey('raw', new Uint8Array(secret as ArrayBuffer), 'HKDF', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: te.encode('savings-tracker/v3'), info: te.encode('vault') }, k, 640));
+  return { id: hex(bits.slice(0, 16)), token: hex(bits.slice(16, 48)), wrapKey: b64(bits.slice(48, 80)) };
 }
 
-/** Google mode: the passphrase only produces the encryption key (salted with the account id); Google handles login. */
-export async function deriveGoogleKey(passphrase: string, sub: string): Promise<string> {
-  const base = await crypto.subtle.importKey('raw', te.encode(passphrase.trim()), 'PBKDF2', false, ['deriveBits']);
-  const bits = new Uint8Array(
-    await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: te.encode(`savings-tracker/v2:${sub}`), iterations: 310_000 }, base, 256),
-  );
-  return b64(bits);
+const aes = (raw: string) => crypto.subtle.importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+
+async function wrapMaster(wrapKey: string, master: string): Promise<Wrap> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aes(wrapKey), unb64(master)));
+  return { iv: b64(iv), ct: b64(ct) };
 }
 
-/** Reads the account id out of a Google ID token. Not a security check (the server verifies the token); it only salts the key. */
-export function tokenSubject(idToken: string): string {
-  const payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: string };
-  if (!payload.sub) throw new Error('Unexpected Google sign-in response');
-  return payload.sub;
-}
-
-/** Trades a Google ID token for a long-lived session on the sync server. */
-export async function exchangeGoogle(url: string, idToken: string): Promise<{ session: string; email: string }> {
-  const res = await fetch(`${url.replace(/\/+$/, '')}/auth/google`, { method: 'POST', body: JSON.stringify({ idToken }) });
-  const body = (await res.json().catch(() => ({}))) as { session?: string; email?: string; error?: string };
-  if (!res.ok || !body.session) throw new Error(body.error ?? `Sign-in failed (${res.status})`);
-  return { session: body.session, email: body.email ?? '' };
-}
-
-async function aesKey(v: Vault) {
-  return crypto.subtle.importKey('raw', unb64(v.key), 'AES-GCM', false, ['encrypt', 'decrypt']);
+async function unwrapMaster(wrapKey: string, w: Wrap): Promise<string> {
+  try {
+    return b64(new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(w.iv) }, await aes(wrapKey), unb64(w.ct))));
+  } catch {
+    throw new Error('This passkey cannot open the stored data');
+  }
 }
 
 export async function encrypt(v: Vault, data: SyncData): Promise<{ iv: string; blob: string }> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(v), te.encode(JSON.stringify(data))));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aes(v.key), te.encode(JSON.stringify(data))));
   return { iv: b64(iv), blob: b64(ct) };
 }
 
 export async function decrypt(v: Vault, iv: string, blob: string): Promise<SyncData> {
   try {
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await aesKey(v), unb64(blob));
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await aes(v.key), unb64(blob));
     const d = JSON.parse(td.decode(pt)) as Partial<SyncData>;
     return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {} };
   } catch {
-    throw new Error('Could not decrypt the synced data (wrong passphrase?)');
+    throw new Error('Could not decrypt the synced data');
   }
 }
 
@@ -124,28 +115,75 @@ export function canon(d: SyncData): string {
 // ---- network ---------------------------------------------------------------------------------------------
 
 const headers = (v: Vault) => ({ Authorization: `Bearer ${v.bearer}`, 'Content-Type': 'application/json' });
-const denied = (v: Vault) => new SyncAuthError(v.mode === 'google' ? 'Your sign-in expired. Sign in with Google again.' : 'Wrong passphrase for this vault');
+const denied = () => new SyncAuthError('The server does not accept this device for the vault. Disconnect and connect again.');
 
-export async function pull(v: Vault): Promise<{ rev: number; data: SyncData } | null> {
+interface Remote { rev: number; iv: string; blob: string; wrap: Wrap | null }
+
+async function fetchRemote(v: Vault): Promise<Remote | null> {
   const res = await fetch(`${v.url}${v.path}`, { headers: headers(v) });
   if (res.status === 404) return null;
-  if (res.status === 401) throw denied(v);
+  if (res.status === 401) throw denied();
   if (!res.ok) throw new Error(`Sync server error ${res.status}`);
-  const j = (await res.json()) as { rev: number; iv: string; blob: string };
-  return { rev: j.rev, data: await decrypt(v, j.iv, j.blob) };
+  return (await res.json()) as Remote;
+}
+
+/** Fetches and decrypts the vault. Also remembers the key envelope the server holds, to send it back on the next upload. */
+export async function pull(v: Vault): Promise<{ rev: number; data: SyncData } | null> {
+  const r = await fetchRemote(v);
+  if (!r) return null;
+  if (r.wrap) v.wrap = r.wrap;
+  return { rev: r.rev, data: await decrypt(v, r.iv, r.blob) };
 }
 
 type PushResult = { ok: true; rev: number } | { ok: false };
 
 export async function push(v: Vault, data: SyncData, ifRev: number): Promise<PushResult> {
   const body = await encrypt(v, data);
-  const res = await fetch(`${v.url}${v.path}?ifRev=${ifRev}`, { method: 'PUT', headers: headers(v), body: JSON.stringify(body) });
+  const res = await fetch(`${v.url}${v.path}?ifRev=${ifRev}`, { method: 'PUT', headers: headers(v), body: JSON.stringify({ ...body, wrap: v.wrap }) });
   if (res.status === 409) return { ok: false };
-  if (res.status === 401) throw denied(v);
+  if (res.status === 401) throw denied();
   if (res.status === 403) throw new Error('This sync server already holds its maximum number of vaults');
   if (!res.ok) throw new Error(`Sync server error ${res.status}`);
   return { ok: true, rev: ((await res.json()) as { rev: number }).rev };
 }
+
+/**
+ * Passkey devices: derive the vault from the passkey secret. A new vault gets a random master key, wrapped under the
+ * passkey; an existing one has its master key unwrapped, so every device with this passkey ends up with the same key.
+ */
+export async function openWithPasskey(url: string, secret: ArrayBuffer | Uint8Array): Promise<{ vault: Vault; existing: boolean }> {
+  const d = await deriveFromSecret(secret);
+  const vault: Vault = { url: base(url), path: `/v/${d.id}`, bearer: d.token, key: '', wrapKey: d.wrapKey };
+  const remote = await fetchRemote(vault);
+  if (!remote) {
+    vault.key = b64(crypto.getRandomValues(new Uint8Array(32)));
+    vault.wrap = await wrapMaster(d.wrapKey, vault.key);
+    return { vault, existing: false };
+  }
+  if (!remote.wrap) throw new Error('This vault has no key envelope');
+  vault.wrap = remote.wrap;
+  vault.key = await unwrapMaster(d.wrapKey, remote.wrap);
+  return { vault, existing: true };
+}
+
+export interface LinkInfo { vaultId: string; token: string; masterKey: string; email?: string }
+
+async function postJson<T>(url: string, path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${base(url)}${path}`, { method: 'POST', body: JSON.stringify(body) });
+  const j = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(j.error ?? `Request failed (${res.status})`);
+  return j;
+}
+
+/** Google backup: store this vault's credentials on the server, sealed, so a Google sign-in can retrieve them. */
+export const linkGoogle = (v: Vault, idToken: string) =>
+  postJson<{ email: string }>(v.url, '/link', { idToken, vaultId: v.path.replace('/v/', ''), token: v.bearer, masterKey: v.key });
+
+export const openLink = (url: string, idToken: string) => postJson<LinkInfo>(url, '/link/open', { idToken });
+export const unlinkGoogle = (url: string, idToken: string) => postJson<{ ok: true }>(url, '/link/remove', { idToken });
+
+/** A device that signed in with Google receives the vault credentials directly. */
+export const openWithLink = (url: string, l: LinkInfo): Vault => ({ url: base(url), path: `/v/${l.vaultId}`, bearer: l.token, key: l.masterKey });
 
 /**
  * One full sync: fetch the remote copy, merge it with `local`, and upload if the result differs from the remote.
