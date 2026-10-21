@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportJson, importJson, setSettings, state } from './store';
 import { monoMid } from './calc';
 import { connectGoogle, connectPasskey, disableGoogleBackup, disconnect, enableGoogleBackup, syncNow, syncState } from './sync';
-import { passkeysAvailable } from './passkey';
+import { passkeysAvailable, prfCapability } from './passkey';
 import { renderGoogleButton } from './google';
 import { GOOGLE_CLIENT_ID, SYNC_URL } from './config';
 
@@ -76,6 +76,8 @@ function SyncCard() {
   const [url, setUrl] = useState(SYNC_URL || localStorage.getItem('sync-url') || '');
   const clientId = GOOGLE_CLIENT_ID;
   const [googleError, setGoogleError] = useState('');
+  const [prf, setPrf] = useState<'yes' | 'no' | 'unknown' | null>(null);
+  useEffect(() => { void prfCapability().then(setPrf); }, []);
   const button = useRef<HTMLDivElement>(null);
   const latest = useRef({ url });
   latest.current = { url };
@@ -148,6 +150,13 @@ function SyncCard() {
         </button>
         <button class="ghost" disabled={sync.busy || !urlOk || !canPasskey} onClick={() => { localStorage.setItem('sync-url', url.trim()); void connectPasskey(url, false); }}>Use my passkey</button>
       </div>
+      {prf && (
+        <p class={`small ${prf === 'no' ? 'neg' : prf === 'yes' ? 'pos' : 'muted'}`} style="margin:10px 0 0">
+          {prf === 'yes' && '✓ This browser can use a passkey for encryption.'}
+          {prf === 'no' && '✕ This browser cannot use a passkey for encryption. Try Safari on an iPhone or Mac, or use the Google backup.'}
+          {prf === 'unknown' && 'This browser does not say whether it supports passkey encryption. Try it; if it fails, use Safari or the Google backup.'}
+        </p>
+      )}
       <p class="muted small" style="margin-bottom:0">
         {canPasskey ? 'First device: Set up. Your other devices: Use my passkey (it arrives through iCloud Keychain or Google Password Manager).' : 'This browser does not support passkeys.'}
       </p>

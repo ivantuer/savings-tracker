@@ -5,6 +5,21 @@ const SALT = te.encode('savings-tracker/prf/v1');
 
 export const passkeysAvailable = () => typeof window !== 'undefined' && !!window.PublicKeyCredential && !!navigator.credentials;
 
+/**
+ * Whether this browser can derive a secret from a passkey (the PRF extension).
+ * 'unknown' means the browser cannot say; trying is the only way to find out.
+ */
+export async function prfCapability(): Promise<'yes' | 'no' | 'unknown'> {
+  if (!passkeysAvailable()) return 'no';
+  try {
+    const caps = await (PublicKeyCredential as unknown as { getClientCapabilities?: () => Promise<Record<string, boolean>> }).getClientCapabilities?.();
+    if (!caps || !('extension:prf' in caps)) return 'unknown';
+    return caps['extension:prf'] ? 'yes' : 'no';
+  } catch {
+    return 'unknown';
+  }
+}
+
 const rnd = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 
 const UNSUPPORTED = 'This device or browser cannot use a passkey for encryption (it lacks the PRF feature). Use Google instead.';
