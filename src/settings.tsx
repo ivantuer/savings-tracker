@@ -63,6 +63,7 @@ export function SettingsView() {
         <input ref={file} type="file" accept="application/json" hidden onChange={(e) => { const f = e.currentTarget.files?.[0]; if (f) void upload(f); e.currentTarget.value = ''; }} />
         {msg && <p class="small">{msg}</p>}
       </div>
+      <DisplayInfo />
       <div class="card">
         <h2>Coming later</h2>
         <p class="muted small">Cashew CSV import (wallet balances) and importing balances from exchange screenshots.</p>
@@ -169,6 +170,40 @@ function SyncCard() {
         </>
       )}
       {googleError && <p class="err">{googleError}</p>}
+    </div>
+  );
+}
+
+/** What the device reports about its screen. Used to diagnose layout problems in the installed iPhone app. */
+function DisplayInfo() {
+  const [rows, setRows] = useState<[string, string][]>([]);
+  useEffect(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const inset = `${cs.paddingTop} / ${cs.paddingRight} / ${cs.paddingBottom} / ${cs.paddingLeft}`;
+    probe.remove();
+    const nav = document.querySelector('.tabs')?.getBoundingClientRect();
+    const vv = window.visualViewport;
+    setRows([
+      ['Installed app (standalone)', String((navigator as unknown as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches)],
+      ['Page area (innerWidth × innerHeight)', `${innerWidth} × ${innerHeight}`],
+      ['Visual viewport', vv ? `${Math.round(vv.width)} × ${Math.round(vv.height)}` : 'n/a'],
+      ['Screen', `${screen.width} × ${screen.height}`],
+      ['Screen minus page area (height)', String(screen.height - innerHeight)],
+      ['Safe-area insets (top / right / bottom / left)', inset],
+      ['Tab bar top / bottom', nav ? `${Math.round(nav.top)} / ${Math.round(nav.bottom)}` : 'n/a'],
+      ['Pixel ratio', String(devicePixelRatio)],
+    ]);
+  }, []);
+  return (
+    <div class="card">
+      <h2>Display info</h2>
+      <p class="muted small" style="margin-top:0">For troubleshooting layout. Nothing here is sent anywhere.</p>
+      <table class="prices"><tbody>
+        {rows.map(([k, v]) => <tr><td class="small">{k}</td><td class="num small">{v}</td></tr>)}
+      </tbody></table>
     </div>
   );
 }
