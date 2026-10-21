@@ -3,6 +3,7 @@ import { exportJson, importJson, setSettings, state } from './store';
 import { monoMid } from './calc';
 import { connect, connectGoogle, disconnect, generatePassphrase, relogin, syncNow, syncState } from './sync';
 import { renderGoogleButton } from './google';
+import { GOOGLE_CLIENT_ID, SYNC_URL } from './config';
 
 export function SettingsView() {
   const s = state.value;
@@ -72,8 +73,8 @@ export function SettingsView() {
 function SyncCard() {
   const sync = syncState.value;
   const [mode, setMode] = useState<'google' | 'passphrase'>('google');
-  const [url, setUrl] = useState(localStorage.getItem('sync-url') ?? '');
-  const [clientId, setClientId] = useState(localStorage.getItem('google-client-id') ?? '');
+  const [url, setUrl] = useState(SYNC_URL || localStorage.getItem('sync-url') || '');
+  const [clientId, setClientId] = useState(GOOGLE_CLIENT_ID || localStorage.getItem('google-client-id') || '');
   const [pass, setPass] = useState('');
   const [googleError, setGoogleError] = useState('');
   const button = useRef<HTMLDivElement>(null);
@@ -129,9 +130,13 @@ function SyncCard() {
         <button class={mode === 'google' ? 'on' : ''} onClick={() => setMode('google')}>Google + passphrase</button>
         <button class={mode === 'passphrase' ? 'on' : ''} onClick={() => setMode('passphrase')}>Passphrase only</button>
       </div>
-      <label>Sync server address</label>
-      <input value={url} placeholder="https://savings-sync.your-name.workers.dev" autocomplete="off" autocapitalize="off" onInput={(e) => setUrl(e.currentTarget.value)} />
-      {mode === 'google' && (
+      {!SYNC_URL && (
+        <>
+          <label>Sync server address</label>
+          <input value={url} placeholder="https://savings-sync.your-name.workers.dev" autocomplete="off" autocapitalize="off" onInput={(e) => setUrl(e.currentTarget.value)} />
+        </>
+      )}
+      {mode === 'google' && !GOOGLE_CLIENT_ID && (
         <>
           <label>Google OAuth client ID</label>
           <input value={clientId} placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" onInput={(e) => setClientId(e.currentTarget.value)} />
@@ -146,7 +151,7 @@ function SyncCard() {
       {googleError && <p class="err">{googleError}</p>}
       {mode === 'google' ? (
         <div style="margin-top:16px">
-          {ready ? <div ref={button} /> : <p class="muted small" style="margin:0">Fill in the three fields above and the Google button appears here.</p>}
+          {ready ? <div ref={button} /> : <p class="muted small" style="margin:0">{SYNC_URL && GOOGLE_CLIENT_ID ? 'Enter a passphrase (12+ characters) and the Google button appears here.' : 'Fill in the fields above and the Google button appears here.'}</p>}
           {sync.busy && <p class="muted small">Connecting…</p>}
         </div>
       ) : (
