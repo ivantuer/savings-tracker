@@ -11,6 +11,7 @@ const empty = (): AppState => ({
   wallets: [],
   positions: [],
   snapshots: [],
+  tombstones: {},
   settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market', theme: 'auto' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
@@ -22,6 +23,9 @@ export const refreshing = signal(false);
 export const refreshError = signal('');
 
 export const uid = () => crypto.randomUUID();
+
+/** Called after every change to wallets, positions or snapshots; the sync engine plugs in here. */
+export const hooks = { dataChanged: () => {}, resumed: () => {} };
 const update = (fn: (s: AppState) => AppState) => (state.value = fn(state.value));
 
 export async function init() {
@@ -32,10 +36,20 @@ export async function init() {
   effect(() => {
     if (ready.value) void set(KEY, JSON.parse(JSON.stringify(state.value)));
   });
+  watchVisibility();
   void refresh();
+}
+
+export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones'] }) {
+  state.value = { ...state.value, ...d };
+}
+
+function watchVisibility() {
   // An installed PWA resumes instead of reloading, so refresh on return too (at most every 2 minutes).
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || refreshing.value) return;
+    if (document.visibilityState !== 'visible') return;
+    hooks.resumed();
+    if (refreshing.value) return;
     const last = state.value.prices.fetchedAt;
     if (!last || Date.now() - new Date(last).getTime() > 120_000) void refresh();
   });
@@ -79,10 +93,21 @@ export const setSettings = (patch: Partial<AppState['settings']>) => {
   if (patch.theme) applyTheme(patch.theme);
 };
 
-export const upsertWallet = (w: Wallet) =>
+export const upsertWallet = (w: Wallet) => {
+  w = { ...w, updatedAt: new Date().toISOString() };
   update((s) => ({ ...s, wallets: s.wallets.some((x) => x.id === w.id) ? s.wallets.map((x) => (x.id === w.id ? w : x)) : [...s.wallets, w] }));
-export const deleteWallet = (id: string) =>
-  update((s) => ({ ...s, wallets: s.wallets.filter((w) => w.id !== id), positions: s.positions.filter((p) => p.walletId !== id) }));
+  hooks.dataChanged();
+};
+export const deleteWallet = (id: string) => {
+  const at = new Date().toISOString();
+  update((s) => ({
+    ...s,
+    wallets: s.wallets.filter((w) => w.id !== id),
+    positions: s.positions.filter((p) => p.walletId !== id),
+    tombstones: { ...s.tombstones, [id]: at, ...Object.fromEntries(s.positions.filter((p) => p.walletId === id).map((p) => [p.id, at])) },
+  }));
+  hooks.dataChanged();
+};
 
 export function upsertPosition(p: Position) {
   const prev = state.value.positions.find((x) => x.id === p.id);
@@ -97,10 +122,12 @@ export function upsertPosition(p: Position) {
   update((s) => ({ ...s, positions: s.positions.some((x) => x.id === p.id) ? s.positions.map((x) => (x.id === p.id ? p : x)) : [...s.positions, p] }));
   if (p.type === 'crypto' || p.type === 'stock') void fetchPrices(state.value).then((prices) => update((s) => ({ ...s, prices })));
   saveSnapshot();
+  hooks.dataChanged();
 }
 export const deletePosition = (id: string) => {
-  update((s) => ({ ...s, positions: s.positions.filter((p) => p.id !== id) }));
+  update((s) => ({ ...s, positions: s.positions.filter((p) => p.id !== id), tombstones: { ...s.tombstones, [id]: new Date().toISOString() } }));
   saveSnapshot();
+  hooks.dataChanged();
 };
 
 export const exportJson = () => JSON.stringify(state.value, null, 2);
@@ -108,5 +135,6 @@ export function importJson(text: string) {
   const data = JSON.parse(text) as AppState;
   if (!Array.isArray(data.wallets) || !Array.isArray(data.positions)) throw new Error('Not a Savings Tracker backup');
   state.value = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
+  hooks.dataChanged();
   void refresh();
 }

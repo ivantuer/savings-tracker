@@ -7,6 +7,7 @@ export interface Wallet {
   id: string;
   name: string;
   category: Category;
+  updatedAt?: string;
 }
 
 export interface Position {
@@ -39,6 +40,8 @@ export interface Position {
 
 export interface Snapshot {
   date: string;
+  /** when this snapshot was taken (a later one wins when devices disagree) */
+  at?: string;
   usd: number;
   uah: number;
   usdt: number;
@@ -85,6 +88,8 @@ export interface AppState {
   wallets: Wallet[];
   positions: Position[];
   snapshots: Snapshot[];
+  /** ids of deleted wallets and positions, so a deletion survives a sync (id -> when) */
+  tombstones: Record<string, string>;
   settings: Settings;
   rates: Rates;
   prices: Prices;

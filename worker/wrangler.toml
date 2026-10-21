@@ -1,0 +1,8 @@
+name = "savings-sync"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "savings-sync"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"

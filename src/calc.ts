@@ -95,6 +95,7 @@ export const netWorth = (s: AppState, to: Display) =>
 export function takeSnapshot(s: AppState): Snapshot {
   return {
     date: new Date().toISOString().slice(0, 10),
+    at: new Date().toISOString(),
     usd: netWorth(s, 'USD'),
     uah: netWorth(s, 'UAH'),
     usdt: netWorth(s, 'USDT'),

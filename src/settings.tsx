@@ -1,11 +1,15 @@
 import { useRef, useState } from 'preact/hooks';
 import { exportJson, importJson, setSettings, state } from './store';
 import { monoMid } from './calc';
+import { connect, disconnect, generatePassphrase, syncNow, syncState } from './sync';
 
 export function SettingsView() {
   const s = state.value;
   const file = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState('');
+  const [url, setUrl] = useState(localStorage.getItem('sync-url') ?? '');
+  const [pass, setPass] = useState('');
+  const sync = syncState.value;
 
   const download = () => {
     const url = URL.createObjectURL(new Blob([exportJson()], { type: 'application/json' }));
@@ -25,6 +29,40 @@ export function SettingsView() {
 
   return (
     <>
+      <div class="card">
+        <h2>Sync across devices</h2>
+        {sync.connected ? (
+          <>
+            <p class="small" style="margin-top:0">
+              <b class={sync.error ? 'neg' : 'pos'}>{sync.busy ? 'Syncing…' : sync.error ? 'Not synced' : 'Connected'}</b>
+              <span class="muted"> · {sync.lastSync ? `last synced ${new Date(sync.lastSync).toLocaleString()}` : 'not synced yet'}</span>
+            </p>
+            {sync.error && <p class="err">{sync.error}</p>}
+            <p class="muted small">Your data is encrypted on this device before it is sent. Server: {sync.url}</p>
+            <div class="actions" style="margin-top:8px">
+              <button class="ghost" disabled={sync.busy} onClick={() => void syncNow()}>Sync now</button>
+              <button class="danger" onClick={() => { if (confirm('Stop syncing on this device? Your data here stays.')) void disconnect(); }}>Disconnect</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p class="muted small" style="margin-top:0">
+              Keeps your wallets and positions in step across phone and computer. Everything is encrypted with your passphrase on the device, so the server only stores scrambled data. Use the same server address and passphrase on every device. A forgotten passphrase cannot be recovered.
+            </p>
+            <label>Sync server address</label>
+            <input value={url} placeholder="https://savings-sync.your-name.workers.dev" autocomplete="off" autocapitalize="off" onInput={(e) => setUrl(e.currentTarget.value)} />
+            <label>Passphrase (12+ characters)</label>
+            <input value={pass} autocomplete="off" autocapitalize="off" spellcheck={false} onInput={(e) => setPass(e.currentTarget.value)} />
+            <div class="chips">
+              <button class="chip" onClick={() => setPass(generatePassphrase())}>Generate a strong one (save it somewhere safe)</button>
+            </div>
+            {sync.error && <p class="err">{sync.error}</p>}
+            <div class="actions">
+              <button class="primary" disabled={sync.busy || !url || !pass} onClick={() => { localStorage.setItem('sync-url', url.trim()); void connect(url, pass); }}>{sync.busy ? 'Connecting…' : 'Connect'}</button>
+            </div>
+          </>
+        )}
+      </div>
       <div class="card">
         <h2>Theme</h2>
         <div class="seg">
