@@ -53,6 +53,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [qty, setQty] = useState(position ? String(position.quantity) : '');
   const [cur, setCur] = useState<Fiat>(position?.currency ?? 'UAH');
   const [cost, setCost] = useState(position?.costBasis != null ? String(position.costBasis) : '');
+  const [unitPrice, setUnitPrice] = useState(position?.unitPrice != null ? String(position.unitPrice) : '');
   const [manualPrice, setManualPrice] = useState(position?.manualPrice != null ? String(position.manualPrice) : '');
   const [face, setFace] = useState(String(position?.bond?.face ?? 1000));
   const [unitValue, setUnitValue] = useState(position?.bond?.unitValue != null ? String(position.bond.unitValue) : '');
@@ -87,6 +88,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       quantity: quantity!,
       currency: type === 'crypto' || type === 'stock' ? undefined : cur,
       manualPrice: type === 'stock' ? num(manualPrice) : undefined,
+      unitPrice: type === 'manual' ? num(unitPrice) : undefined,
       bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined } : undefined,
       costBasis: num(cost),
       history: position?.history,
@@ -96,7 +98,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
     onClose();
   };
 
-  const qtyLabel = { fiat: 'Balance', crypto: 'Amount', stock: 'Shares', manual: 'Current value', bond: 'Number of bonds' }[type];
+  const qtyLabel = { fiat: 'Balance', crypto: 'Amount', stock: 'Shares', manual: 'Certificates (units held)', bond: 'Number of bonds' }[type];
   const costLabel = type === 'crypto' || type === 'stock' ? 'Total cost in USD (optional)' : `Total invested in ${cur} (optional)`;
 
   return (
@@ -120,7 +122,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       {(type === 'fiat' || type === 'manual' || type === 'bond') && (
         <>
           <label>Name</label>
-          <input value={name} placeholder={type === 'fiat' ? 'Wallet cash, Card…' : type === 'manual' ? 'Fund / project name' : 'ОВДП UA4000…'} onInput={(e) => setName(e.currentTarget.value)} />
+          <input value={name} placeholder={type === 'fiat' ? 'Wallet cash, Card…' : type === 'manual' ? 'REIT, MilTech, Energy…' : 'ОВДП UA4000…'} onInput={(e) => setName(e.currentTarget.value)} />
           <label>Currency</label>
           <select value={cur} onChange={(e) => setCur(e.currentTarget.value as Fiat)}>
             <option>UAH</option><option>USD</option><option>EUR</option>
@@ -129,6 +131,12 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       )}
       <label>{qtyLabel}</label>
       <input inputMode="decimal" value={qty} onInput={(e) => setQty(e.currentTarget.value)} />
+      {type === 'manual' && (
+        <>
+          <label>Current price per certificate in {cur} (blank = amount above is the total value)</label>
+          <input inputMode="decimal" value={unitPrice} onInput={(e) => setUnitPrice(e.currentTarget.value)} />
+        </>
+      )}
       {type === 'stock' && (
         <>
           <label>Manual price in USD (used if no live quote)</label>

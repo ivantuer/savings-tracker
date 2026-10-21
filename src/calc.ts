@@ -23,8 +23,9 @@ export function convert(amount: number, from: Cur, to: Cur, r: Rates): number {
 export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cur } | null {
   switch (p.type) {
     case 'fiat':
-    case 'manual':
       return { amount: p.quantity, cur: p.currency ?? 'UAH' };
+    case 'manual':
+      return { amount: p.quantity * (p.unitPrice ?? 1), cur: p.currency ?? 'UAH' };
     case 'bond':
       return { amount: p.quantity * (p.bond?.unitValue ?? p.bond?.face ?? 0), cur: p.currency ?? 'UAH' };
     case 'crypto': {

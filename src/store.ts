@@ -73,7 +73,7 @@ export function upsertPosition(p: Position) {
   const prev = state.value.positions.find((x) => x.id === p.id);
   const trackable = p.type === 'manual' || p.type === 'bond';
   if (trackable) {
-    const value = p.type === 'bond' ? p.quantity * (p.bond?.unitValue ?? 0) : p.quantity;
+    const value = p.type === 'bond' ? p.quantity * (p.bond?.unitValue ?? 0) : p.quantity * (p.unitPrice ?? 1);
     const last = prev?.history?.at(-1);
     if (!last || last.value !== value) {
       p = { ...p, history: [...(prev?.history ?? p.history ?? []), { date: new Date().toISOString(), value }] };

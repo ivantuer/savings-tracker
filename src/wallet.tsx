@@ -36,7 +36,7 @@ export function WalletView({ wallet, back }: { wallet: Wallet; back: () => void 
               <div class="l">
                 <div>{p.type === 'crypto' || p.type === 'stock' ? (p.symbol ?? p.name) : p.name}</div>
                 <div class="muted small">
-                  {p.type === 'crypto' || p.type === 'stock' ? `${fmtQty(p.quantity)} ${p.type === 'stock' ? 'sh' : ''}` : p.type === 'bond' ? `${fmtQty(p.quantity)} bonds${p.bond?.maturity ? ` · matures ${p.bond.maturity}` : ''}` : nv ? fmtNative(nv.amount, nv.cur) : ''}
+                  {p.type === 'crypto' || p.type === 'stock' ? `${fmtQty(p.quantity)} ${p.type === 'stock' ? 'sh' : ''}` : p.type === 'bond' ? `${fmtQty(p.quantity)} bonds${p.bond?.maturity ? ` · matures ${p.bond.maturity}` : ''}` : p.type === 'manual' && p.unitPrice != null ? `${fmtQty(p.quantity)} × ${fmtNative(p.unitPrice, p.currency ?? 'UAH')}` : nv ? fmtNative(nv.amount, nv.cur) : ''}
                   {nv == null && ' · no price'}
                   {stale && <span class="stale"> · updated {daysAgo(p.updatedAt)}d ago</span>}
                 </div>

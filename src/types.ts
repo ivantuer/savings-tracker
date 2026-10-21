@@ -18,12 +18,14 @@ export interface Position {
   symbol?: string;
   /** crypto: CoinGecko id */
   coingeckoId?: string;
-  /** fiat: amount; crypto/stock: units; manual: current value; bond: number of bonds */
+  /** fiat: amount; crypto/stock: units; manual: certificates (or total value without unitPrice); bond: number of bonds */
   quantity: number;
   /** fiat / manual / bond currency */
   currency?: Fiat;
   /** stock: price used when no live quote is available */
   manualPrice?: number;
+  /** manual (Inzhur): current price of one certificate; blank means quantity is the total value */
+  unitPrice?: number;
   /** bond: current value of one bond (defaults to face) */
   bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string };
   /** total cost in the position's native currency (USD for crypto/stock), optional */
