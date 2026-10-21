@@ -73,6 +73,8 @@ export interface Settings {
   display: Display;
   finnhubKey: string;
   hideBalances: boolean;
+  /** which UAH/USD rate converts hryvnia: NBU official, or market (Binance USDT/UAH) */
+  uahRate: 'nbu' | 'market';
 }
 
 export interface AppState {
@@ -86,11 +88,11 @@ export interface AppState {
 }
 
 export const CATEGORIES: { id: Category; label: string; color: string }[] = [
-  { id: 'cash', label: 'Cash & Cards', color: '#3ddc97' },
-  { id: 'crypto', label: 'Crypto', color: '#f7b84b' },
-  { id: 'stocks', label: 'Crypto Stocks', color: '#6aa8ff' },
-  { id: 'inzhur', label: 'Inzhur', color: '#c58bff' },
-  { id: 'ovdp', label: 'ОВДП', color: '#ff7a8a' },
+  { id: 'cash', label: 'Cash & Cards', color: 'var(--c-cash)' },
+  { id: 'crypto', label: 'Crypto', color: 'var(--c-crypto)' },
+  { id: 'stocks', label: 'Crypto Stocks', color: 'var(--c-stocks)' },
+  { id: 'inzhur', label: 'Inzhur', color: 'var(--c-inzhur)' },
+  { id: 'ovdp', label: 'ОВДП', color: 'var(--c-ovdp)' },
 ];
 
 export const categoryLabel = (c: Category) => CATEGORIES.find((x) => x.id === c)!.label;

@@ -25,6 +25,14 @@ export function SettingsView() {
   return (
     <>
       <div class="card">
+        <h2>UAH → USD rate</h2>
+        <p class="muted small">Which rate converts hryvnia holdings into USD and USDT. Official is the NBU rate (₴{s.rates.usdUah.toFixed(2)}); market uses USDT/UAH on Binance (₴{s.rates.usdtUah.toFixed(2)}).</p>
+        <div class="seg">
+          <button class={s.settings.uahRate === 'nbu' ? 'on' : ''} onClick={() => setSettings({ uahRate: 'nbu' })}>NBU official</button>
+          <button class={s.settings.uahRate === 'market' ? 'on' : ''} onClick={() => setSettings({ uahRate: 'market' })}>Market (Binance)</button>
+        </div>
+      </div>
+      <div class="card">
         <h2>Stock prices</h2>
         <p class="muted small">Crypto uses CoinGecko, UAH rates use NBU and Binance (no keys). Stocks need a free Finnhub API key; without one the manual price is used. The key stays on this device.</p>
         <label>Finnhub API key</label>

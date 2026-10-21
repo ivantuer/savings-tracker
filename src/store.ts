@@ -11,7 +11,7 @@ const empty = (): AppState => ({
   wallets: [],
   positions: [],
   snapshots: [],
-  settings: { display: 'USD', finnhubKey: '', hideBalances: false },
+  settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'nbu' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
 });
@@ -32,6 +32,12 @@ export async function init() {
     if (ready.value) void set(KEY, JSON.parse(JSON.stringify(state.value)));
   });
   void refresh();
+  // An installed PWA resumes instead of reloading, so refresh on return too (at most every 2 minutes).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || refreshing.value) return;
+    const last = state.value.prices.fetchedAt;
+    if (!last || Date.now() - new Date(last).getTime() > 120_000) void refresh();
+  });
 }
 
 export async function refresh() {

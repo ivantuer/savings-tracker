@@ -1,14 +1,14 @@
 import { useState } from 'preact/hooks';
-import { state, ready, refreshing, refreshError, refresh, setDisplay, setSettings } from './store';
+import { state, ready, refreshing, refresh, setDisplay, setSettings } from './store';
 import { CATEGORIES, categoryColor, categoryLabel, type Display } from './types';
-import { categoryTotals, creditRows, daysAgo, fmt, netWorth, walletTotal } from './calc';
-import { downloadSellReminder } from './ics';
-import { Donut, LineChart } from './charts';
+import { fmt, netWorth, walletTotal } from './calc';
+import { Dashboard } from './dashboard';
+import { PricesView } from './prices';
 import { WalletView } from './wallet';
 import { WalletForm } from './forms';
 import { SettingsView } from './settings';
 
-type Tab = 'overview' | 'wallets' | 'settings';
+type Tab = 'overview' | 'wallets' | 'prices' | 'settings';
 
 export function App() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -36,7 +36,7 @@ export function App() {
         </div>
       </div>
 
-      {tab === 'overview' && <Overview goWallet={(id) => { setWalletId(id); setTab('wallets'); }} />}
+      {tab === 'overview' && <Dashboard goWallet={(id) => { setWalletId(id); setTab('wallets'); }} />}
 
       {tab === 'wallets' && wallet && <WalletView wallet={wallet} back={() => setWalletId(null)} />}
       {tab === 'wallets' && !wallet && (
@@ -51,7 +51,7 @@ export function App() {
             if (!ws.length) return null;
             return (
               <div class="card">
-                <div class="row" style="margin-bottom:4px"><span class="dot" style={{ background: c.color }} /><b>{c.label}</b></div>
+                <div class="row" style="margin-bottom:4px"><span class="swatch" style={{ background: c.color }} /><b>{c.label}</b><span class="num muted small" style="margin-left:auto">{fmt(ws.reduce((a, w) => a + walletTotal(w.id, s, d), 0), d)}</span></div>
                 {ws.map((w) => (
                   <div class="item" onClick={() => setWalletId(w.id)}>
                     <div class="l"><div>{w.name}</div><div class="muted small">{s.positions.filter((p) => p.walletId === w.id).length} positions</div></div>
@@ -61,100 +61,24 @@ export function App() {
               </div>
             );
           })}
+          {s.wallets.length > 0 && (
+            <div class="card row between"><b>Total</b><b class="num">{fmt(netWorth(s, d), d)}</b></div>
+          )}
         </>
       )}
 
+      {tab === 'prices' && <PricesView />}
       {tab === 'settings' && <SettingsView />}
 
       {addingWallet && <WalletForm onClose={() => setAddingWallet(false)} onSaved={(id) => { setAddingWallet(false); setWalletId(id); }} />}
 
       <nav class="tabs">
-        {(['overview', 'wallets', 'settings'] as Tab[]).map((t) => (
+        {(['overview', 'wallets', 'prices', 'settings'] as Tab[]).map((t) => (
           <button class={tab === t ? 'on' : ''} onClick={() => { setTab(t); if (t !== 'wallets') setWalletId(null); }}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
       </nav>
-    </div>
-  );
-}
-
-function Overview({ goWallet }: { goWallet: (id: string) => void }) {
-  const s = state.value;
-  const d = s.settings.display;
-  const totals = categoryTotals(s, d);
-  const total = netWorth(s, d);
-  const last = s.snapshots.at(-1);
-  const prev = s.snapshots.at(-2);
-  const delta = last && prev ? (d === 'USD' ? last.usd - prev.usd : d === 'UAH' ? last.uah - prev.uah : last.usdt - prev.usdt) : null;
-  const staleDays = s.rates.fetchedAt ? daysAgo(s.rates.fetchedAt) : null;
-
-  if (!s.positions.length)
-    return (
-      <div class="card">
-        <h2>Welcome</h2>
-        <p class="muted">Start in the Wallets tab: add a wallet (an exchange, Inzhur, a card…), then add what it holds.</p>
-      </div>
-    );
-
-  return (
-    <>
-      <div class="card">
-        <div class="muted small">Net worth</div>
-        <div class="total num">{fmt(total, d)}</div>
-        {delta != null && (
-          <div class={`small num ${delta >= 0 ? 'pos' : 'neg'}`}>{delta >= 0 ? '▲' : '▼'} {fmt(Math.abs(delta), d)} since {prev!.date}</div>
-        )}
-        <div class="muted small" style="margin-top:6px">
-          1 USD = ₴{s.rates.usdUah.toFixed(2)} · 1 USDT = ₴{s.rates.usdtUah.toFixed(2)}
-          {staleDays != null && staleDays > 0 && <span class="stale"> · rates {staleDays}d old</span>}
-        </div>
-        {refreshError.value && <div class="err">Some prices failed to refresh; using the last known ones.</div>}
-      </div>
-      <CreditCard goWallet={goWallet} />
-      <div class="card"><h2>Allocation</h2><Donut totals={totals} display={d} /></div>
-      <div class="card"><h2>History</h2><LineChart snaps={s.snapshots} display={d} /></div>
-      <div class="card">
-        <h2>By category</h2>
-        {CATEGORIES.map((c) => (
-          <div class="item" style="cursor:default">
-            <div class="row"><span class="dot" style={{ background: categoryColor(c.id) }} />{categoryLabel(c.id)}</div>
-            <div class="r num">{fmt(totals[c.id], d)}</div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function CreditCard({ goWallet }: { goWallet: (id: string) => void }) {
-  const s = state.value;
-  const d = s.settings.display;
-  const rows = creditRows(s, d);
-  if (!rows.length) return null;
-  const owed = rows.reduce((a, r) => a + r.owed, 0);
-  const value = rows.reduce((a, r) => a + r.value, 0);
-  return (
-    <div class="card">
-      <h2>Credit-funded ОВДП</h2>
-      <div class="muted small" style="margin-bottom:6px">
-        Worth <span class="num">{fmt(value, d)}</span> · owed <span class="num">{fmt(owed, d)}</span> · if sold now <b class={value - owed >= 0 ? 'pos num' : 'neg num'}>{value - owed >= 0 ? '+' : '−'}{fmt(Math.abs(value - owed), d)}</b>
-      </div>
-      {rows.map(({ position: p, value: v, owed: o, days }) => (
-        <div class="item" onClick={() => goWallet(p.walletId)}>
-          <div class="l">
-            <div>{p.name}</div>
-            <div class={days <= 7 ? 'neg small' : 'muted small'}>
-              {days < 0 ? `${-days}d overdue` : days === 0 ? 'sell today' : `${days}d left`} · by {p.credit!.sellBy}{p.credit!.bank ? ` · ${p.credit!.bank}` : ''}
-            </div>
-          </div>
-          <div class="r">
-            <div class="num">{fmt(v, d)}</div>
-            <div class={`small num ${v - o >= 0 ? 'pos' : 'neg'}`}>{v - o >= 0 ? '+' : '−'}{fmt(Math.abs(v - o), d)}</div>
-            <button class="link small" onClick={(e) => { e.stopPropagation(); downloadSellReminder(p); }}>🔔 Remind me</button>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

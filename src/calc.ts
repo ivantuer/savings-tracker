@@ -1,6 +1,10 @@
-import type { AppState, Category, Display, Fiat, Position, Rates, Snapshot } from './types';
+import type { AppState, Category, Display, Fiat, Position, Rates, Snapshot, Wallet } from './types';
 
 type Cur = Fiat | 'USDT';
+
+/** Rates used for conversion; 'market' prices hryvnia through USDT/UAH on Binance instead of the NBU rate. */
+export const ratesOf = (s: AppState): Rates =>
+  s.settings.uahRate === 'market' ? { ...s.rates, usdUah: s.rates.usdtUah / s.rates.usdtUsd } : s.rates;
 
 const usdPer = (cur: Cur, r: Rates): number => {
   switch (cur) {
@@ -53,14 +57,14 @@ export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cu
 
 export function positionValue(p: Position, s: AppState, to: Display): number | null {
   const v = nativeValue(p, s);
-  return v ? convert(v.amount, v.cur, to, s.rates) : null;
+  return v ? convert(v.amount, v.cur, to, ratesOf(s)) : null;
 }
 
 /** Cost basis converted into the display currency, or null if not set. */
 export function positionCost(p: Position, s: AppState, to: Display): number | null {
   if (p.costBasis == null) return null;
   const cur: Cur = p.type === 'crypto' || p.type === 'stock' ? 'USD' : (p.currency ?? 'UAH');
-  return convert(p.costBasis, cur, to, s.rates);
+  return convert(p.costBasis, cur, to, ratesOf(s));
 }
 
 export function walletTotal(walletId: string, s: AppState, to: Display): number {
@@ -130,10 +134,83 @@ export function creditRows(s: AppState, to: Display): CreditRow[] {
     .map((p) => ({
       position: p,
       value: positionValue(p, s, to) ?? 0,
-      owed: convert(p.credit!.owed, p.currency ?? 'UAH', to, s.rates),
+      owed: convert(p.credit!.owed, p.currency ?? 'UAH', to, ratesOf(s)),
       days: daysUntil(p.credit!.sellBy),
     }))
     .sort((a, b) => a.days - b.days);
 }
 
 export const daysAgo = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
+export const fmtCompact = (n: number) => {
+  const a = Math.abs(n);
+  const f = (v: number, s: string) => `${(+v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)).toString()}${s}`;
+  return (n < 0 ? '−' : '') + (a >= 1e9 ? f(a / 1e9, 'B') : a >= 1e6 ? f(a / 1e6, 'M') : a >= 1e3 ? f(a / 1e3, 'K') : f(a, ''));
+};
+
+export interface Holding { position: Position; wallet: Wallet; value: number; cost: number | null; pnl: number | null }
+
+/** Every priced position with its value, cost and unrealized P&L in the display currency, largest first. */
+export function holdings(s: AppState, to: Display): Holding[] {
+  const out: Holding[] = [];
+  for (const p of s.positions) {
+    const wallet = s.wallets.find((w) => w.id === p.walletId);
+    const value = positionValue(p, s, to);
+    if (!wallet || value == null) continue;
+    const cost = positionCost(p, s, to);
+    out.push({ position: p, wallet, value, cost, pnl: cost != null && cost > 0 ? value - cost : null });
+  }
+  return out.sort((a, b) => b.value - a.value);
+}
+
+export function pnlSummary(s: AppState, to: Display) {
+  const rows = holdings(s, to).filter((h) => h.pnl != null);
+  const value = rows.reduce((a, h) => a + h.value, 0);
+  const cost = rows.reduce((a, h) => a + h.cost!, 0);
+  const sorted = [...rows].sort((a, b) => b.pnl! - a.pnl!);
+  return { count: rows.length, value, cost, pnl: value - cost, pct: cost > 0 ? ((value - cost) / cost) * 100 : 0, best: sorted.slice(0, 3).filter((h) => h.pnl! > 0), worst: sorted.slice(-3).reverse().filter((h) => h.pnl! < 0) };
+}
+
+/** Where the money is denominated: hryvnia, euro, or dollar-linked (USD, USDT, crypto, tokenized stocks). */
+export function exposure(s: AppState, to: Display): { uah: number; usd: number; eur: number } {
+  const out = { uah: 0, usd: 0, eur: 0 };
+  for (const p of s.positions) {
+    const v = positionValue(p, s, to);
+    if (v == null) continue;
+    const cur = p.type === 'crypto' || p.type === 'stock' ? 'USD' : (p.currency ?? 'UAH');
+    out[cur === 'UAH' ? 'uah' : cur === 'EUR' ? 'eur' : 'usd'] += v;
+  }
+  return out;
+}
+
+export type Range = '1D' | '7D' | '30D' | '90D' | 'All';
+export const RANGES: Range[] = ['1D', '7D', '30D', '90D', 'All'];
+const rangeDays: Record<Range, number> = { '1D': 1, '7D': 7, '30D': 30, '90D': 90, All: Infinity };
+
+export function snapshotsIn(s: AppState, r: Range): Snapshot[] {
+  if (r === 'All') return s.snapshots;
+  const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
+  const inside = s.snapshots.filter((x) => x.date >= from);
+  const before = s.snapshots.filter((x) => x.date < from).at(-1);
+  return before ? [before, ...inside] : inside;
+}
+
+/** Change of net worth over the range, against the snapshot at (or just before) its start. */
+export function periodChange(s: AppState, to: Display, r: Range) {
+  const snaps = snapshotsIn(s, r);
+  const base = snaps[0];
+  if (!base || base.date === new Date().toISOString().slice(0, 10)) return null;
+  const was = snapshotValue(base, to);
+  const delta = netWorth(s, to) - was;
+  return { delta, pct: was > 0 ? (delta / was) * 100 : 0, since: base.date };
+}
+
+/** Per-category history in the display currency (category split is stored in USD, scaled to the snapshot's total). */
+export function historyRows(snaps: Snapshot[], to: Display) {
+  return snaps.map((sn) => {
+    const total = snapshotValue(sn, to);
+    const k = sn.usd > 0 ? total / sn.usd : 0;
+    const byCat = Object.fromEntries(Object.entries(sn.byCategory).map(([c, v]) => [c, (v ?? 0) * k])) as Partial<Record<Category, number>>;
+    return { date: sn.date, total, byCat };
+  });
+}
