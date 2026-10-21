@@ -1,4 +1,4 @@
-import type { AppState, Prices, Rates } from './types';
+import type { AppState, BondQuote, Prices, Rates } from './types';
 
 const j = async <T>(url: string, retry = true): Promise<T> => {
   const res = await fetch(url);
@@ -58,8 +58,71 @@ async function fetchInzhur(): Promise<Record<string, number>> {
   return parseInzhurPrices(await res.text());
 }
 
+/**
+ * Minimal decoder for the "devalue" format Astro embeds in pages: a flat array where every object
+ * value and array item is an index into that array. Unknown tagged types decode to null.
+ */
+export function parseDevalue(json: string): unknown {
+  const values = JSON.parse(json) as unknown[];
+  const memo = new Map<number, unknown>();
+  const hydrate = (i: number): unknown => {
+    if (i === -1) return undefined;
+    if (i === -2) return NaN;
+    if (i === -3) return Infinity;
+    if (i === -4) return -Infinity;
+    if (i === -5) return -0;
+    if (memo.has(i)) return memo.get(i);
+    const v = values[i];
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) {
+      if (typeof v[0] === 'string') {
+        const out =
+          v[0] === 'Map'
+            ? new Map(Array.from({ length: (v.length - 1) / 2 }, (_, k) => [hydrate(v[1 + 2 * k]), hydrate(v[2 + 2 * k])]))
+            : v[0] === 'Set' ? new Set(v.slice(1).map(hydrate)) : null;
+        memo.set(i, out);
+        return out;
+      }
+      const arr: unknown[] = [];
+      memo.set(i, arr);
+      for (const x of v) arr.push(hydrate(x as number));
+      return arr;
+    }
+    const obj: Record<string, unknown> = {};
+    memo.set(i, obj);
+    for (const [k, x] of Object.entries(v)) obj[k] = hydrate(x as number);
+    return obj;
+  };
+  return hydrate(0);
+}
+
+/** Bond quotes (UAH per bond) from the public inzhur.reit bond catalog, keyed by ISIN. */
+export function parseInzhurBonds(html: string): Record<string, BondQuote> {
+  const m = html.match(/<script[^>]*type="application\/json\+devalue"[^>]*>([\s\S]*?)<\/script>/);
+  const out: Record<string, BondQuote> = {};
+  if (!m) return out;
+  const walk = (v: unknown): void => {
+    if (!v || typeof v !== 'object') return;
+    const o = v as Record<string, any>;
+    if (typeof o.isin === 'string' && o.prices) {
+      const sell = Number(o.prices.sellUAH ?? o.prices.sell);
+      const buy = Number(o.prices.buyUAH ?? o.prices.buy);
+      if (sell > 0) out[o.isin.toUpperCase()] = { sell, buy, maturity: o.maturityDate?.slice?.(0, 10), yieldPct: o.returnRates?.buy };
+    }
+    for (const x of v instanceof Map ? v.values() : Object.values(o)) walk(x);
+  };
+  walk(parseDevalue(m[1]));
+  return out;
+}
+
+export async function fetchBondQuotes(): Promise<Record<string, BondQuote>> {
+  const res = await fetch('https://www.inzhur.reit/offer/ovdp');
+  if (!res.ok) throw new Error(`inzhur bonds ${res.status}`);
+  return parseInzhurBonds(await res.text());
+}
+
 export async function fetchPrices(s: AppState): Promise<Prices> {
-  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks }, inzhur: { ...s.prices.inzhur } };
+  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks }, inzhur: { ...s.prices.inzhur }, bonds: { ...s.prices.bonds } };
   const ids = [...new Set(s.positions.filter((p) => p.type === 'crypto' && p.coingeckoId).map((p) => p.coingeckoId!))];
   const tickers = [...new Set(s.positions.filter((p) => p.type === 'stock' && p.symbol).map((p) => p.symbol!.toUpperCase()))];
 
@@ -86,6 +149,9 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
   }
   if (s.positions.some((p) => p.type === 'manual' && p.symbol)) {
     tasks.push(fetchInzhur().then((r) => { Object.assign(next.inzhur!, r); }));
+  }
+  if (s.positions.some((p) => p.type === 'bond' && p.bond?.isin)) {
+    tasks.push(fetchBondQuotes().then((r) => { Object.assign(next.bonds!, r); }));
   }
   await Promise.allSettled(tasks);
   next.fetchedAt = new Date().toISOString();

@@ -27,7 +27,7 @@ export interface Position {
   /** manual (Inzhur): current price of one certificate; blank means quantity is the total value */
   unitPrice?: number;
   /** bond: current value of one bond (defaults to face) */
-  bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string };
+  bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string; isin?: string };
   /** bond bought with borrowed money (e.g. a credit-card grace period) that must be sold by a date */
   credit?: { bank?: string; owed: number; boughtOn?: string; sellBy: string };
   /** total cost in the position's native currency (USD for crypto/stock), optional */
@@ -57,11 +57,15 @@ export interface Rates {
   fetchedAt?: string;
 }
 
+export interface BondQuote { sell: number; buy: number; maturity?: string; yieldPct?: number }
+
 export interface Prices {
   crypto: Record<string, number>; // coingeckoId -> USD
   stocks: Record<string, number>; // ticker -> USD
   /** Inzhur fund key (REIT, MILTECH, ENERGY) -> UAH per certificate */
   inzhur?: Record<string, number>;
+  /** ОВДП by ISIN, from Inzhur's public catalog (UAH per bond) */
+  bonds?: Record<string, BondQuote>;
   fetchedAt?: string;
 }
 

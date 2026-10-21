@@ -25,6 +25,12 @@ export function unitPriceOf(p: Position, s: AppState): number | undefined {
   return live ?? p.unitPrice;
 }
 
+/** Value of one bond: the live sell price from the Inzhur catalog (by ISIN), else the manual value, else face. */
+export function bondUnitValue(p: Position, s: AppState): number | undefined {
+  const live = p.bond?.isin ? s.prices.bonds?.[p.bond.isin.toUpperCase()]?.sell : undefined;
+  return live ?? p.bond?.unitValue ?? p.bond?.face;
+}
+
 /** Value of a position in its native currency, or null when no price is available. */
 export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cur } | null {
   switch (p.type) {
@@ -33,7 +39,7 @@ export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cu
     case 'manual':
       return { amount: p.quantity * (unitPriceOf(p, s) ?? 1), cur: p.currency ?? 'UAH' };
     case 'bond':
-      return { amount: p.quantity * (p.bond?.unitValue ?? p.bond?.face ?? 0), cur: p.currency ?? 'UAH' };
+      return { amount: p.quantity * (bondUnitValue(p, s) ?? 0), cur: p.currency ?? 'UAH' };
     case 'crypto': {
       const price = p.coingeckoId ? s.prices.crypto[p.coingeckoId] : undefined;
       return price == null ? null : { amount: p.quantity * price, cur: 'USD' };

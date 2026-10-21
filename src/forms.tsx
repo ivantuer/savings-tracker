@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
 import { deleteWallet, deletePosition, uid, upsertPosition, upsertWallet } from './store';
 import { addDays } from './calc';
-import { INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
+import { fetchBondQuotes, INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
   return (
@@ -59,6 +59,8 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [manualPrice, setManualPrice] = useState(position?.manualPrice != null ? String(position.manualPrice) : '');
   const [face, setFace] = useState(String(position?.bond?.face ?? 1000));
   const [unitValue, setUnitValue] = useState(position?.bond?.unitValue != null ? String(position.bond.unitValue) : '');
+  const [isin, setIsin] = useState(position?.bond?.isin ?? '');
+  const [lookupMsg, setLookupMsg] = useState('');
   const [coupon, setCoupon] = useState(position?.bond?.couponRate != null ? String(position.bond.couponRate) : '');
   const [maturity, setMaturity] = useState(position?.bond?.maturity ?? '');
   const [onCredit, setOnCredit] = useState(!!position?.credit);
@@ -73,6 +75,18 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
     setQ(v);
     if (v.length < 2) return setHits(QUICK_COINS);
     try { setHits(await searchCoins(v)); } catch { /* keep previous hits */ }
+  };
+  const lookup = async () => {
+    setLookupMsg('Looking up…');
+    try {
+      const q = (await fetchBondQuotes())[isin.trim().toUpperCase()];
+      if (!q) return setLookupMsg('Not in the Inzhur catalog. Enter the value manually.');
+      setUnitValue(String(q.sell));
+      if (q.maturity) setMaturity(q.maturity);
+      setLookupMsg(`Found: ₴${q.sell} per bond, matures ${q.maturity ?? '?'}${q.yieldPct ? `, ${q.yieldPct}% yield` : ''}. The price updates itself.`);
+    } catch {
+      setLookupMsg('Lookup failed. Try again later.');
+    }
   };
   const pick = (c: CoinHit) => { setCoinId(c.id); setSymbol(c.symbol.toUpperCase()); setName(c.name); };
 
@@ -97,7 +111,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       currency: type === 'crypto' || type === 'stock' ? undefined : cur,
       manualPrice: type === 'stock' ? num(manualPrice) : undefined,
       unitPrice: type === 'manual' ? num(unitPrice) : undefined,
-      bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined } : undefined,
+      bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined, isin: isin.trim().toUpperCase() || undefined } : undefined,
       credit: type === 'bond' && onCredit ? { bank: bank.trim() || undefined, owed: num(owed) ?? num(cost) ?? 0, boughtOn: boughtOn || undefined, sellBy } : undefined,
       costBasis: num(cost),
       history: position?.history,
@@ -159,9 +173,15 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       )}
       {type === 'bond' && (
         <>
+          <label>ISIN (optional, gives a live price)</label>
+          <div class="row">
+            <input value={isin} placeholder="UA4000…" onInput={(e) => setIsin(e.currentTarget.value)} />
+            <button class="ghost" disabled={isin.trim().length < 12} onClick={() => void lookup()}>Look up</button>
+          </div>
+          {lookupMsg && <div class="muted small" style="margin-top:6px">{lookupMsg}</div>}
           <label>Face value per bond</label>
           <input inputMode="decimal" value={face} onInput={(e) => setFace(e.currentTarget.value)} />
-          <label>Current value per bond (face + accrued; blank = face)</label>
+          <label>{isin ? 'Fallback value' : 'Current value'} per bond (face + accrued; blank = face)</label>
           <input inputMode="decimal" value={unitValue} onInput={(e) => setUnitValue(e.currentTarget.value)} />
           <label>Coupon rate, % per year</label>
           <input inputMode="decimal" value={coupon} onInput={(e) => setCoupon(e.currentTarget.value)} />

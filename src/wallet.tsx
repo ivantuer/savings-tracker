@@ -31,14 +31,14 @@ export function WalletView({ wallet, back }: { wallet: Wallet; back: () => void 
           const cost = positionCost(p, s, d);
           const pnl = v != null && cost != null && cost > 0 ? v - cost : null;
           const nv = nativeValue(p, s);
-          const live = p.type === 'manual' && !!p.symbol && s.prices.inzhur?.[p.symbol] != null;
+          const live = (p.type === 'manual' && !!p.symbol && s.prices.inzhur?.[p.symbol] != null) || (p.type === 'bond' && !!p.bond?.isin && s.prices.bonds?.[p.bond.isin.toUpperCase()] != null);
           const stale = !live && (p.type === 'manual' || p.type === 'bond') && daysAgo(p.updatedAt) > 30;
           return (
             <div class="item" onClick={() => setEditing(p)}>
               <div class="l">
                 <div>{p.type === 'crypto' || p.type === 'stock' ? (p.symbol ?? p.name) : p.name}</div>
                 <div class="muted small">
-                  {p.type === 'crypto' || p.type === 'stock' ? `${fmtQty(p.quantity)} ${p.type === 'stock' ? 'sh' : ''}` : p.type === 'bond' ? `${fmtQty(p.quantity)} bonds${p.bond?.maturity ? ` · matures ${p.bond.maturity}` : ''}` : p.type === 'manual' && unitPriceOf(p, s) != null ? `${fmtQty(p.quantity)} × ${fmtNative(unitPriceOf(p, s)!, p.currency ?? 'UAH')}${p.symbol && s.prices.inzhur?.[p.symbol] ? ' · live' : ''}` : nv ? fmtNative(nv.amount, nv.cur) : ''}
+                  {p.type === 'crypto' || p.type === 'stock' ? `${fmtQty(p.quantity)} ${p.type === 'stock' ? 'sh' : ''}` : p.type === 'bond' ? `${fmtQty(p.quantity)} bonds${p.bond?.maturity ? ` · matures ${p.bond.maturity}` : ''}${live ? ' · live' : ''}` : p.type === 'manual' && unitPriceOf(p, s) != null ? `${fmtQty(p.quantity)} × ${fmtNative(unitPriceOf(p, s)!, p.currency ?? 'UAH')}${p.symbol && s.prices.inzhur?.[p.symbol] ? ' · live' : ''}` : nv ? fmtNative(nv.amount, nv.cur) : ''}
                   {nv == null && ' · no price'}
                   {p.credit && <span class={daysUntil(p.credit.sellBy) <= 7 ? 'neg' : 'stale'}> · sell by {p.credit.sellBy} ({daysUntil(p.credit.sellBy)}d)</span>}
                   {stale && <span class="stale"> · updated {daysAgo(p.updatedAt)}d ago</span>}
