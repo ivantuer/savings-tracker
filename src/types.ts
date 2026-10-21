@@ -66,6 +66,8 @@ export interface BondQuote { sell: number; buy: number; maturity?: string; yield
 
 export interface Prices {
   crypto: Record<string, number>; // coingeckoId -> USD
+  /** which source supplied each crypto price when it was not CoinGecko */
+  cryptoSource?: Record<string, 'Binance'>;
   stocks: Record<string, number>; // ticker -> USD
   /** Inzhur fund key (REIT, MILTECH, ENERGY) -> UAH per certificate */
   inzhur?: Record<string, number>;

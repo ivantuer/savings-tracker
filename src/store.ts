@@ -63,7 +63,7 @@ export async function refresh() {
     const rates = await fetchRates(state.value.rates);
     update((s) => ({ ...s, rates }));
     const prices = await fetchPrices(state.value);
-    update((s) => ({ ...s, prices }));
+    update((s) => ({ ...s, prices, rates: { ...s.rates, usdtUsd: prices.crypto.tether ?? s.rates.usdtUsd } }));
   } catch (e) {
     refreshError.value = e instanceof Error ? e.message : 'Refresh failed';
   } finally {

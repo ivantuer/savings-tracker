@@ -27,14 +27,12 @@ export async function fetchRates(prev: Rates): Promise<Rates> {
   const next: Rates = { ...prev };
   // Monobank allows one request per 5 minutes per IP, so reuse a fresh quote.
   const monoFresh = prev.mono && Date.now() - new Date(prev.mono.at).getTime() < 5 * 60_000;
-  const [nbu, mono, tether] = await Promise.allSettled([
+  const [nbu, mono] = await Promise.allSettled([
     j<{ cc: string; rate: number }[]>('https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json'),
     monoFresh ? Promise.resolve(null) : j<{ currencyCodeA: number; currencyCodeB: number; rateBuy?: number; rateSell?: number }[]>('https://api.monobank.ua/bank/currency', false),
-    j<{ tether: { usd: number } }>('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd'),
   ]);
   if (nbu.status === 'rejected') fail('NBU rates', nbu.reason);
   if (mono.status === 'rejected') fail('Monobank rates', mono.reason);
-  if (tether.status === 'rejected') fail('CoinGecko USDT', tether.reason);
   if (nbu.status === 'fulfilled') {
     next.usdUah = nbu.value.find((r) => r.cc === 'USD')?.rate ?? next.usdUah;
     next.eurUah = nbu.value.find((r) => r.cc === 'EUR')?.rate ?? next.eurUah;
@@ -45,7 +43,6 @@ export async function fetchRates(prev: Rates): Promise<Rates> {
     if (usd?.rateBuy && usd.rateSell && eur?.rateBuy && eur.rateSell)
       next.mono = { usdBuy: usd.rateBuy, usdSell: usd.rateSell, eurBuy: eur.rateBuy, eurSell: eur.rateSell, at: new Date().toISOString() };
   }
-  if (tether.status === 'fulfilled') next.usdtUsd = tether.value.tether?.usd ?? next.usdtUsd;
   next.usdtUah = next.usdUah * next.usdtUsd;
   next.fetchedAt = new Date().toISOString();
   return next;
@@ -142,21 +139,51 @@ export async function fetchBondQuotes(): Promise<Record<string, BondQuote>> {
   return parseInzhurBonds(await res.text());
 }
 
+/** Binance pairs (against USDT) for coins whose ticker is unambiguous, used when CoinGecko cannot be reached. */
+const BINANCE: Record<string, string> = {
+  bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL', binancecoin: 'BNB', ripple: 'XRP', tron: 'TRX', chainlink: 'LINK',
+  stellar: 'XLM', 'avalanche-2': 'AVAX', cardano: 'ADA', dogecoin: 'DOGE', 'pax-gold': 'PAXG',
+};
+
+/**
+ * USD prices by CoinGecko id, from one CoinGecko request. If that fails (a phone network can use up CoinGecko's free
+ * allowance), the major coins fall back to Binance. Anything else keeps its last known price.
+ */
+export async function fetchCrypto(ids: string[]): Promise<{ prices: Record<string, number>; source: Record<string, 'Binance'> }> {
+  const prices: Record<string, number> = {};
+  const source: Record<string, 'Binance'> = {};
+  const want = [...new Set([...ids, 'tether'])];
+  try {
+    const r = await j<Record<string, { usd: number }>>(`https://api.coingecko.com/api/v3/simple/price?ids=${want.join(',')}&vs_currencies=usd`);
+    for (const id of want) if (r[id]?.usd != null) prices[id] = r[id].usd;
+  } catch (e) {
+    fail('CoinGecko prices', e);
+  }
+  const missing = want.filter((id) => prices[id] == null && BINANCE[id]);
+  if (missing.length) {
+    try {
+      const r = await j<{ symbol: string; price: string }[]>(`https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(missing.map((id) => `${BINANCE[id]}USDT`)))}`);
+      for (const { symbol, price } of r) {
+        const id = missing.find((m) => `${BINANCE[m]}USDT` === symbol);
+        if (id) { prices[id] = Number(price); source[id] = 'Binance'; }
+      }
+    } catch (e) {
+      fail('Binance prices', e);
+    }
+  }
+  return { prices, source };
+}
+
 export async function fetchPrices(s: AppState): Promise<Prices> {
-  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks }, inzhur: { ...s.prices.inzhur }, bonds: { ...s.prices.bonds } };
+  const next: Prices = { crypto: { ...s.prices.crypto }, stocks: { ...s.prices.stocks }, inzhur: { ...s.prices.inzhur }, bonds: { ...s.prices.bonds }, cryptoSource: {} };
   const ids = [...new Set(s.positions.filter((p) => p.type === 'crypto' && p.coingeckoId).map((p) => p.coingeckoId!))];
   const tickers = [...new Set(s.positions.filter((p) => p.type === 'stock' && p.symbol).map((p) => p.symbol!.toUpperCase()))];
 
   const tasks: Promise<void>[] = [];
-  if (ids.length) {
-    tasks.push(
-      j<Record<string, { usd: number }>>(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`,
-      ).then((r) => {
-        for (const id of ids) if (r[id]?.usd != null) next.crypto[id] = r[id].usd;
-      }, (e) => fail('CoinGecko prices', e)),
-    );
-  }
+  tasks.push(fetchCrypto(ids).then(({ prices, source }) => {
+    Object.assign(next.crypto, prices);
+    next.cryptoSource = source;
+  }));
   if (s.settings.finnhubKey) {
     for (const t of tickers) {
       tasks.push(

@@ -53,7 +53,7 @@ export function PricesView() {
           <table class="prices"><tbody>
             {coins.map((p) => {
               const price = s.prices.crypto[p.coingeckoId!];
-              return <tr><td>{p.symbol ?? p.name}<div class="muted small">{p.coingeckoId}</div></td><td class={`num ${price == null ? 'neg' : ''}`}>{price == null ? 'no price' : usd(price)}</td></tr>;
+              return <tr><td>{p.symbol ?? p.name}<div class="muted small">{s.prices.cryptoSource?.[p.coingeckoId!] ? `via ${s.prices.cryptoSource[p.coingeckoId!]} (CoinGecko unavailable)` : p.coingeckoId}</div></td><td class={`num ${price == null ? 'neg' : ''}`}>{price == null ? 'no price' : usd(price)}</td></tr>;
             })}
           </tbody></table>
         </div>
