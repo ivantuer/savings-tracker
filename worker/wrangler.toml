@@ -5,7 +5,7 @@ compatibility_date = "2025-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "savings-sync"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "556dace4-8ed4-4dd4-86d8-41e5dc7ee660"
 
 [vars]
 # OAuth client ID from Google Cloud (it is public, not a secret). Tokens issued for any other client are refused.

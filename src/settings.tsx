@@ -74,24 +74,23 @@ export function SettingsView() {
 function SyncCard() {
   const sync = syncState.value;
   const [url, setUrl] = useState(SYNC_URL || localStorage.getItem('sync-url') || '');
-  const [clientId, setClientId] = useState(GOOGLE_CLIENT_ID || localStorage.getItem('google-client-id') || '');
+  const clientId = GOOGLE_CLIENT_ID;
   const [googleError, setGoogleError] = useState('');
   const button = useRef<HTMLDivElement>(null);
-  const latest = useRef({ url, clientId });
-  latest.current = { url, clientId };
+  const latest = useRef({ url });
+  latest.current = { url };
 
   const urlOk = /^https:\/\/|^http:\/\/localhost/.test(url.trim());
-  const googleReady = urlOk && clientId.trim().length > 10;
+  const googleReady = urlOk && clientId.length > 10;
   // The Google button is used to connect a device without a passkey, or to add the Google backup from a passkey device.
   const wantButton = sync.connected ? sync.kind === 'passkey' : googleReady;
 
   useEffect(() => {
     if (!wantButton || !button.current) return;
     setGoogleError('');
-    renderGoogleButton(button.current, clientId.trim(), (idToken) => {
+    renderGoogleButton(button.current, clientId, (idToken) => {
       const l = latest.current;
       localStorage.setItem('sync-url', l.url.trim());
-      localStorage.setItem('google-client-id', l.clientId.trim());
       const st = syncState.value;
       if (!st.connected) void connectGoogle(l.url, idToken);
       else if (st.linked) void disableGoogleBackup(idToken);
@@ -109,7 +108,7 @@ function SyncCard() {
         </p>
         <p class="small" style="margin:0 0 6px">Unlocked with {sync.kind === 'passkey' ? 'your passkey' : <>Google{sync.email ? <> (<b>{sync.email}</b>)</> : null}</>}</p>
         {sync.error && <p class="err">{sync.error}</p>}
-        {sync.kind === 'passkey' && (
+        {sync.kind === 'passkey' && GOOGLE_CLIENT_ID && (
           <>
             <p class="small" style="margin:12px 0 4px"><b>Google backup: {sync.linked ? `on${sync.email ? ` (${sync.email})` : ''}` : 'off'}</b></p>
             <p class="muted small" style="margin:0 0 8px">
@@ -117,7 +116,7 @@ function SyncCard() {
                 ? 'A device without passkey support can sign in with this Google account to open your data. While this is on, your sync server holds the key sealed, so it can read your data. Sign in below with the same account to turn it off.'
                 : 'Lets a device without passkey support open your data by signing in with Google. The server then keeps your key sealed, so it can read your data. Off by default.'}
             </p>
-            {googleReady ? <div ref={button} /> : <p class="muted small">Needs the Google client ID to be set up.</p>}
+            {googleReady && <div ref={button} />}
           </>
         )}
         {googleError && <p class="err">{googleError}</p>}
@@ -152,16 +151,14 @@ function SyncCard() {
       <p class="muted small" style="margin-bottom:0">
         {canPasskey ? 'First device: Set up. Your other devices: Use my passkey (it arrives through iCloud Keychain or Google Password Manager).' : 'This browser does not support passkeys.'}
       </p>
-      <hr style="border:0;border-top:1px solid var(--grid);margin:16px 0" />
-      <p class="small" style="margin:0 0 6px"><b>Device without passkey support?</b></p>
-      <p class="muted small" style="margin:0 0 8px">Sign in with the Google account you set up as a backup from a passkey device.</p>
-      {!GOOGLE_CLIENT_ID && (
+      {GOOGLE_CLIENT_ID && (
         <>
-          <label>Google OAuth client ID</label>
-          <input value={clientId} placeholder="1234…apps.googleusercontent.com" autocomplete="off" autocapitalize="off" onInput={(e) => setClientId(e.currentTarget.value)} />
+          <hr style="border:0;border-top:1px solid var(--grid);margin:16px 0" />
+          <p class="small" style="margin:0 0 6px"><b>Device without passkey support?</b></p>
+          <p class="muted small" style="margin:0 0 8px">Sign in with the Google account you set up as a backup from a passkey device.</p>
+          {googleReady && <div ref={button} style="margin-top:10px" />}
         </>
       )}
-      {googleReady ? <div ref={button} style="margin-top:10px" /> : <p class="muted small">{GOOGLE_CLIENT_ID ? 'Enter the server address first.' : 'Enter the server address and client ID to show the Google button.'}</p>}
       {googleError && <p class="err">{googleError}</p>}
     </div>
   );
