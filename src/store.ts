@@ -11,7 +11,7 @@ const empty = (): AppState => ({
   wallets: [],
   positions: [],
   snapshots: [],
-  settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'nbu' },
+  settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
 });
