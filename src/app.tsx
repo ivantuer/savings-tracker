@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks';
 import { state, ready, refreshing, refreshError, refresh, setDisplay, setSettings } from './store';
 import { CATEGORIES, categoryColor, categoryLabel, type Display } from './types';
-import { categoryTotals, daysAgo, fmt, netWorth, walletTotal } from './calc';
+import { categoryTotals, creditRows, daysAgo, fmt, netWorth, walletTotal } from './calc';
+import { downloadSellReminder } from './ics';
 import { Donut, LineChart } from './charts';
 import { WalletView } from './wallet';
 import { WalletForm } from './forms';
@@ -110,6 +111,7 @@ function Overview({ goWallet }: { goWallet: (id: string) => void }) {
         </div>
         {refreshError.value && <div class="err">Some prices failed to refresh; using the last known ones.</div>}
       </div>
+      <CreditCard goWallet={goWallet} />
       <div class="card"><h2>Allocation</h2><Donut totals={totals} display={d} /></div>
       <div class="card"><h2>History</h2><LineChart snaps={s.snapshots} display={d} /></div>
       <div class="card">
@@ -122,5 +124,37 @@ function Overview({ goWallet }: { goWallet: (id: string) => void }) {
         ))}
       </div>
     </>
+  );
+}
+
+function CreditCard({ goWallet }: { goWallet: (id: string) => void }) {
+  const s = state.value;
+  const d = s.settings.display;
+  const rows = creditRows(s, d);
+  if (!rows.length) return null;
+  const owed = rows.reduce((a, r) => a + r.owed, 0);
+  const value = rows.reduce((a, r) => a + r.value, 0);
+  return (
+    <div class="card">
+      <h2>Credit-funded ОВДП</h2>
+      <div class="muted small" style="margin-bottom:6px">
+        Worth <span class="num">{fmt(value, d)}</span> · owed <span class="num">{fmt(owed, d)}</span> · if sold now <b class={value - owed >= 0 ? 'pos num' : 'neg num'}>{value - owed >= 0 ? '+' : '−'}{fmt(Math.abs(value - owed), d)}</b>
+      </div>
+      {rows.map(({ position: p, value: v, owed: o, days }) => (
+        <div class="item" onClick={() => goWallet(p.walletId)}>
+          <div class="l">
+            <div>{p.name}</div>
+            <div class={days <= 7 ? 'neg small' : 'muted small'}>
+              {days < 0 ? `${-days}d overdue` : days === 0 ? 'sell today' : `${days}d left`} · by {p.credit!.sellBy}{p.credit!.bank ? ` · ${p.credit!.bank}` : ''}
+            </div>
+          </div>
+          <div class="r">
+            <div class="num">{fmt(v, d)}</div>
+            <div class={`small num ${v - o >= 0 ? 'pos' : 'neg'}`}>{v - o >= 0 ? '+' : '−'}{fmt(Math.abs(v - o), d)}</div>
+            <button class="link small" onClick={(e) => { e.stopPropagation(); downloadSellReminder(p); }}>🔔 Remind me</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

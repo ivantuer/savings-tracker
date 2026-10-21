@@ -3,6 +3,7 @@ import { state } from './store';
 import { categoryLabel, type Position, type Wallet } from './types';
 import { daysAgo, fmt, fmtNative, fmtQty, nativeValue, positionCost, positionValue, unitPriceOf, walletTotal } from './calc';
 import { PositionForm, WalletForm } from './forms';
+import { daysUntil } from './calc';
 
 export function WalletView({ wallet, back }: { wallet: Wallet; back: () => void }) {
   const [editing, setEditing] = useState<Position | 'new' | null>(null);
@@ -39,6 +40,7 @@ export function WalletView({ wallet, back }: { wallet: Wallet; back: () => void 
                 <div class="muted small">
                   {p.type === 'crypto' || p.type === 'stock' ? `${fmtQty(p.quantity)} ${p.type === 'stock' ? 'sh' : ''}` : p.type === 'bond' ? `${fmtQty(p.quantity)} bonds${p.bond?.maturity ? ` · matures ${p.bond.maturity}` : ''}` : p.type === 'manual' && unitPriceOf(p, s) != null ? `${fmtQty(p.quantity)} × ${fmtNative(unitPriceOf(p, s)!, p.currency ?? 'UAH')}${p.symbol && s.prices.inzhur?.[p.symbol] ? ' · live' : ''}` : nv ? fmtNative(nv.amount, nv.cur) : ''}
                   {nv == null && ' · no price'}
+                  {p.credit && <span class={daysUntil(p.credit.sellBy) <= 7 ? 'neg' : 'stale'}> · sell by {p.credit.sellBy} ({daysUntil(p.credit.sellBy)}d)</span>}
                   {stale && <span class="stale"> · updated {daysAgo(p.updatedAt)}d ago</span>}
                 </div>
               </div>

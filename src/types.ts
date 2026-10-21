@@ -28,6 +28,8 @@ export interface Position {
   unitPrice?: number;
   /** bond: current value of one bond (defaults to face) */
   bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string };
+  /** bond bought with borrowed money (e.g. a credit-card grace period) that must be sold by a date */
+  credit?: { bank?: string; owed: number; boughtOn?: string; sellBy: string };
   /** total cost in the position's native currency (USD for crypto/stock), optional */
   costBasis?: number;
   /** manual / bond value updates */

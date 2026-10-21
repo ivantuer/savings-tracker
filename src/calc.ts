@@ -106,4 +106,28 @@ export function fmtQty(n: number): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 8 });
 }
 
+/** Whole days from today to an ISO date (negative when past). */
+export const daysUntil = (iso: string) => Math.ceil((new Date(`${iso}T23:59:59`).getTime() - Date.now()) / 86_400_000);
+
+export const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+export interface CreditRow { position: Position; value: number; owed: number; days: number }
+
+/** Credit-funded bonds in the display currency, soonest deadline first. */
+export function creditRows(s: AppState, to: Display): CreditRow[] {
+  return s.positions
+    .filter((p) => p.credit)
+    .map((p) => ({
+      position: p,
+      value: positionValue(p, s, to) ?? 0,
+      owed: convert(p.credit!.owed, p.currency ?? 'UAH', to, s.rates),
+      days: daysUntil(p.credit!.sellBy),
+    }))
+    .sort((a, b) => a.days - b.days);
+}
+
 export const daysAgo = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);

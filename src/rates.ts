@@ -1,7 +1,11 @@
 import type { AppState, Prices, Rates } from './types';
 
-const j = async <T>(url: string): Promise<T> => {
+const j = async <T>(url: string, retry = true): Promise<T> => {
   const res = await fetch(url);
+  if (res.status === 429 && retry) {
+    await new Promise((r) => setTimeout(r, 2500));
+    return j<T>(url, false);
+  }
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return res.json();
 };

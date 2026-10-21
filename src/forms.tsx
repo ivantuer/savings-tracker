@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
 import { deleteWallet, deletePosition, uid, upsertPosition, upsertWallet } from './store';
+import { addDays } from './calc';
 import { INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
@@ -60,6 +61,11 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [unitValue, setUnitValue] = useState(position?.bond?.unitValue != null ? String(position.bond.unitValue) : '');
   const [coupon, setCoupon] = useState(position?.bond?.couponRate != null ? String(position.bond.couponRate) : '');
   const [maturity, setMaturity] = useState(position?.bond?.maturity ?? '');
+  const [onCredit, setOnCredit] = useState(!!position?.credit);
+  const [bank, setBank] = useState(position?.credit?.bank ?? '');
+  const [owed, setOwed] = useState(position?.credit ? String(position.credit.owed) : '');
+  const [boughtOn, setBoughtOn] = useState(position?.credit?.boughtOn ?? new Date().toISOString().slice(0, 10));
+  const [sellBy, setSellBy] = useState(position?.credit?.sellBy ?? '');
   const [hits, setHits] = useState<CoinHit[]>(QUICK_COINS);
   const [q, setQ] = useState('');
 
@@ -74,7 +80,8 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const valid =
     quantity != null && !Number.isNaN(quantity) &&
     (type === 'crypto' ? !!coinId : type === 'stock' ? !!symbol.trim() : !!name.trim()) &&
-    (type !== 'bond' || num(face) != null);
+    (type !== 'bond' || num(face) != null) &&
+    (!onCredit || !!sellBy);
 
   const save = () => {
     if (!valid) return;
@@ -91,6 +98,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       manualPrice: type === 'stock' ? num(manualPrice) : undefined,
       unitPrice: type === 'manual' ? num(unitPrice) : undefined,
       bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined } : undefined,
+      credit: type === 'bond' && onCredit ? { bank: bank.trim() || undefined, owed: num(owed) ?? num(cost) ?? 0, boughtOn: boughtOn || undefined, sellBy } : undefined,
       costBasis: num(cost),
       history: position?.history,
       updatedAt: new Date().toISOString(),
@@ -159,6 +167,22 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
           <input inputMode="decimal" value={coupon} onInput={(e) => setCoupon(e.currentTarget.value)} />
           <label>Maturity date</label>
           <input type="date" value={maturity} onInput={(e) => setMaturity(e.currentTarget.value)} />
+          <label class="row" style="margin-top:16px"><input type="checkbox" style="width:auto" checked={onCredit} onChange={(e) => setOnCredit(e.currentTarget.checked)} /> Bought with credit money (grace period)</label>
+          {onCredit && (
+            <>
+              <label>Bank / card</label>
+              <input value={bank} placeholder="e.g. Privat, Mono credit card" onInput={(e) => setBank(e.currentTarget.value)} />
+              <label>Amount to repay in {cur} (blank = total invested)</label>
+              <input inputMode="decimal" value={owed} onInput={(e) => setOwed(e.currentTarget.value)} />
+              <label>Bought on</label>
+              <input type="date" value={boughtOn} onInput={(e) => setBoughtOn(e.currentTarget.value)} />
+              <label>Sell by</label>
+              <input type="date" value={sellBy} onInput={(e) => setSellBy(e.currentTarget.value)} />
+              <div class="chips">
+                {[50, 55, 60].map((n) => <button class="chip" onClick={() => boughtOn && setSellBy(addDays(boughtOn, n))}>+{n} days</button>)}
+              </div>
+            </>
+          )}
         </>
       )}
       <label>{costLabel}</label>
