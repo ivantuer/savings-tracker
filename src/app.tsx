@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { state, ready, refreshing, refresh, setDisplay, setSettings } from './store';
 import { CATEGORIES, categoryColor, categoryLabel, type Display } from './types';
 import { fmt, netWorth, walletTotal } from './calc';
@@ -14,6 +14,9 @@ export function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [walletId, setWalletId] = useState<string | null>(null);
   const [addingWallet, setAddingWallet] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
+  // A new screen starts at the top. Otherwise a short screen inherits the long one's scroll position and jumps.
+  useEffect(() => { scroller.current?.scrollTo(0, 0); }, [tab, walletId]);
   if (!ready.value) return null;
   const s = state.value;
   const d = s.settings.display;
@@ -21,7 +24,8 @@ export function App() {
   const blur = s.settings.hideBalances ? 'blur' : '';
 
   return (
-    <div class={blur}>
+    <div class={`shell ${blur}`}>
+      <div class="scroll" ref={scroller}>
       <div class="topbar">
         <div class="seg">
           {(['UAH', 'USD', 'USDT'] as Display[]).map((c) => (
@@ -69,6 +73,8 @@ export function App() {
 
       {tab === 'prices' && <PricesView />}
       {tab === 'settings' && <SettingsView />}
+
+      </div>
 
       {addingWallet && <WalletForm onClose={() => setAddingWallet(false)} onSaved={(id) => { setAddingWallet(false); setWalletId(id); }} />}
 
