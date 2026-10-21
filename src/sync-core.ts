@@ -8,8 +8,14 @@ export interface SyncData {
   tombstones: Record<string, string>;
 }
 
-/** What a device keeps after connecting. The passphrase itself is never stored. */
-export interface Vault { url: string; id: string; auth: string; key: string }
+/**
+ * What a device keeps after connecting. The passphrase itself is never stored.
+ * `bearer` is a passphrase-derived token (passphrase-only mode) or a session issued after Google sign-in.
+ */
+export interface Vault { url: string; path: string; bearer: string; key: string; mode: 'passphrase' | 'google' }
+
+/** The server no longer accepts this device's credentials. In Google mode that means signing in again. */
+export class SyncAuthError extends Error {}
 
 const te = new TextEncoder();
 const td = new TextDecoder();
@@ -23,7 +29,31 @@ export async function deriveVault(url: string, passphrase: string): Promise<Vaul
   const bits = new Uint8Array(
     await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: te.encode('savings-tracker/v1'), iterations: 310_000 }, base, 640),
   );
-  return { url: url.replace(/\/+$/, ''), auth: hex(bits.slice(0, 32)), key: b64(bits.slice(32, 64)), id: hex(bits.slice(64, 80)) };
+  return { url: url.replace(/\/+$/, ''), path: `/v/${hex(bits.slice(64, 80))}`, bearer: hex(bits.slice(0, 32)), key: b64(bits.slice(32, 64)), mode: 'passphrase' };
+}
+
+/** Google mode: the passphrase only produces the encryption key (salted with the account id); Google handles login. */
+export async function deriveGoogleKey(passphrase: string, sub: string): Promise<string> {
+  const base = await crypto.subtle.importKey('raw', te.encode(passphrase.trim()), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: te.encode(`savings-tracker/v2:${sub}`), iterations: 310_000 }, base, 256),
+  );
+  return b64(bits);
+}
+
+/** Reads the account id out of a Google ID token. Not a security check (the server verifies the token); it only salts the key. */
+export function tokenSubject(idToken: string): string {
+  const payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: string };
+  if (!payload.sub) throw new Error('Unexpected Google sign-in response');
+  return payload.sub;
+}
+
+/** Trades a Google ID token for a long-lived session on the sync server. */
+export async function exchangeGoogle(url: string, idToken: string): Promise<{ session: string; email: string }> {
+  const res = await fetch(`${url.replace(/\/+$/, '')}/auth/google`, { method: 'POST', body: JSON.stringify({ idToken }) });
+  const body = (await res.json().catch(() => ({}))) as { session?: string; email?: string; error?: string };
+  if (!res.ok || !body.session) throw new Error(body.error ?? `Sign-in failed (${res.status})`);
+  return { session: body.session, email: body.email ?? '' };
 }
 
 async function aesKey(v: Vault) {
@@ -93,12 +123,13 @@ export function canon(d: SyncData): string {
 
 // ---- network ---------------------------------------------------------------------------------------------
 
-const headers = (v: Vault) => ({ Authorization: `Bearer ${v.auth}`, 'Content-Type': 'application/json' });
+const headers = (v: Vault) => ({ Authorization: `Bearer ${v.bearer}`, 'Content-Type': 'application/json' });
+const denied = (v: Vault) => new SyncAuthError(v.mode === 'google' ? 'Your sign-in expired. Sign in with Google again.' : 'Wrong passphrase for this vault');
 
 export async function pull(v: Vault): Promise<{ rev: number; data: SyncData } | null> {
-  const res = await fetch(`${v.url}/v/${v.id}`, { headers: headers(v) });
+  const res = await fetch(`${v.url}${v.path}`, { headers: headers(v) });
   if (res.status === 404) return null;
-  if (res.status === 401) throw new Error('Wrong passphrase for this vault');
+  if (res.status === 401) throw denied(v);
   if (!res.ok) throw new Error(`Sync server error ${res.status}`);
   const j = (await res.json()) as { rev: number; iv: string; blob: string };
   return { rev: j.rev, data: await decrypt(v, j.iv, j.blob) };
@@ -108,9 +139,9 @@ type PushResult = { ok: true; rev: number } | { ok: false };
 
 export async function push(v: Vault, data: SyncData, ifRev: number): Promise<PushResult> {
   const body = await encrypt(v, data);
-  const res = await fetch(`${v.url}/v/${v.id}?ifRev=${ifRev}`, { method: 'PUT', headers: headers(v), body: JSON.stringify(body) });
+  const res = await fetch(`${v.url}${v.path}?ifRev=${ifRev}`, { method: 'PUT', headers: headers(v), body: JSON.stringify(body) });
   if (res.status === 409) return { ok: false };
-  if (res.status === 401) throw new Error('Wrong passphrase for this vault');
+  if (res.status === 401) throw denied(v);
   if (res.status === 403) throw new Error('This sync server already holds its maximum number of vaults');
   if (!res.ok) throw new Error(`Sync server error ${res.status}`);
   return { ok: true, rev: ((await res.json()) as { rev: number }).rev };

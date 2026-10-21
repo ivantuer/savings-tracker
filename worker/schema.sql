@@ -8,3 +8,8 @@ CREATE TABLE IF NOT EXISTS vaults (
   prev_iv TEXT,
   prev_blob TEXT
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
