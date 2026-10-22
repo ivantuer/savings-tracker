@@ -22,7 +22,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { position: fixed; inset: 0; width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; background: var(--surface); }
+html, body { touch-action: pan-x pan-y; position: fixed; inset: 0; width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; background: var(--surface); }
 body { color: var(--ink); font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
 #app { height: 100%; }
 /* The page never scrolls. The shell fills the screen: a scrolling area and a tab bar in normal flow, so the bar can
