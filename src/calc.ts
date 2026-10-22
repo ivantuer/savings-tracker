@@ -198,11 +198,47 @@ export type Range = '1D' | '7D' | '30D' | '90D' | 'All';
 export const RANGES: Range[] = ['1D', '7D', '30D', '90D', 'All'];
 const rangeDays: Record<Range, number> = { '1D': 1, '7D': 7, '30D': 30, '90D': 90, All: Infinity };
 
+/**
+ * Snapshots as if credit-funded bonds had never counted towards net worth. Older snapshots included them, so their
+ * value is taken back out: exactly, when the snapshot lists per-position values, otherwise estimated from the value
+ * history of the bond (and only from the day the app first knew about it).
+ */
+export function adjustedSnapshots(s: AppState): Snapshot[] {
+  const credits = s.positions.filter((p) => p.credit);
+  if (!credits.length) return s.snapshots;
+  return s.snapshots.map((sn) => {
+    const byCategory = { ...sn.byCategory };
+    const byPosition = sn.byPosition ? { ...sn.byPosition } : undefined;
+    let cut = 0;
+    for (const p of credits) {
+      let v: number | undefined;
+      if (sn.byPosition) v = sn.byPosition[p.id];
+      else {
+        const end = endOf(sn);
+        const known = [...(p.history ?? [])].filter((h) => h.date <= end).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+        if (known) {
+          const cur = p.currency ?? 'UAH';
+          v = cur === 'UAH' && sn.uah > 0 ? known.value / (sn.uah / sn.usd) : cur === 'USD' ? known.value : convert(known.value, cur, 'USD', s.rates);
+        }
+      }
+      if (v == null || !(v > 0)) continue;
+      cut += v;
+      const cat = s.wallets.find((w) => w.id === p.walletId)?.category;
+      if (cat) byCategory[cat] = Math.max(0, (byCategory[cat] ?? 0) - v);
+      if (byPosition) delete byPosition[p.id];
+    }
+    if (!cut) return sn;
+    const k = sn.usd > 0 ? 1 - cut / sn.usd : 1;
+    return { ...sn, usd: sn.usd - cut, uah: sn.uah * k, usdt: sn.usdt * k, byCategory, byPosition };
+  });
+}
+
 export function snapshotsIn(s: AppState, r: Range): Snapshot[] {
-  if (r === 'All') return s.snapshots;
+  const all = adjustedSnapshots(s);
+  if (r === 'All') return all;
   const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
-  const inside = s.snapshots.filter((x) => x.date >= from);
-  const before = s.snapshots.filter((x) => x.date < from).at(-1);
+  const inside = all.filter((x) => x.date >= from);
+  const before = all.filter((x) => x.date < from).at(-1);
   return before ? [before, ...inside] : inside;
 }
 
@@ -241,6 +277,11 @@ export interface DayRow {
   byCat: Partial<Record<Category, number>>;
   /** positions by gain/loss that day, biggest move first (empty for days recorded before this was tracked) */
   movers: { id: string; pl: number }[];
+  /** per position, in the display currency: gain/loss, end-of-day value, previous end-of-day value, money added or removed */
+  posPl?: Record<string, number>;
+  posNw?: Record<string, number>;
+  posBefore?: Record<string, number>;
+  posFlow?: Record<string, number>;
 }
 
 const endOf = (sn: Snapshot) => sn.at ?? `${sn.date}T23:59:59Z`;
@@ -250,13 +291,14 @@ const endOf = (sn: Snapshot) => sn.at ?? `${sn.date}T23:59:59Z`;
  * rate, so a hryvnia move shows up in the day it happened. Deposits and withdrawals are taken out so they never look like profit.
  */
 export function dailyRows(s: AppState, to: Display): DayRow[] {
-  const snaps = [...s.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+  const snaps = [...adjustedSnapshots(s)].sort((a, b) => a.date.localeCompare(b.date));
   const scale = (sn: Snapshot) => (sn.usd > 0 ? snapshotValue(sn, to) / sn.usd : 0);
+  const flows = s.flows.filter((f) => !f.id.startsWith('credit-excl-'));
   const rows: DayRow[] = [];
   for (let i = 1; i < snaps.length; i++) {
     const prev = snaps[i - 1], cur = snaps[i];
     const kPrev = scale(prev), kCur = scale(cur);
-    const inDay = s.flows.filter((f) => f.at > endOf(prev) && f.at <= endOf(cur));
+    const inDay = flows.filter((f) => f.at > endOf(prev) && f.at <= endOf(cur));
     const flow = inDay.reduce((a, f) => a + f.usd * kCur, 0);
     const nw = snapshotValue(cur, to), before = snapshotValue(prev, to);
     const pl = nw - before - flow;
@@ -269,27 +311,76 @@ export function dailyRows(s: AppState, to: Display): DayRow[] {
     }
 
     const movers: DayRow['movers'] = [];
+    let posPl: Record<string, number> | undefined, posNw: Record<string, number> | undefined, posBefore: Record<string, number> | undefined, posFlow: Record<string, number> | undefined;
     if (cur.byPosition && prev.byPosition) {
-      const ids = new Set([...Object.keys(cur.byPosition), ...Object.keys(prev.byPosition)]);
-      for (const id of ids) {
+      posPl = {}; posNw = {}; posBefore = {}; posFlow = {};
+      for (const id of new Set([...Object.keys(cur.byPosition), ...Object.keys(prev.byPosition)])) {
         const fp = inDay.filter((f) => f.positionId === id).reduce((a, f) => a + f.usd * kCur, 0);
-        const v = (cur.byPosition[id] ?? 0) * kCur - (prev.byPosition[id] ?? 0) * kPrev - fp;
-        if (Math.abs(v) >= 0.005) movers.push({ id, pl: v });
+        const v = (cur.byPosition[id] ?? 0) * kCur, b = (prev.byPosition[id] ?? 0) * kPrev;
+        posNw[id] = v; posBefore[id] = b; posFlow[id] = fp; posPl[id] = v - b - fp;
+        if (Math.abs(posPl[id]) >= 0.005) movers.push({ id, pl: posPl[id] });
       }
       movers.sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
     }
-    rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers });
+    rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers, posPl, posNw, posBefore, posFlow });
   }
   return rows;
 }
 
-export function rowsIn(rows: DayRow[], r: Range): DayRow[] {
+export interface Part { key: string; label: string; pl: number }
+export interface ViewRow extends DayRow { parts: Part[] }
+
+export const positionLabel = (p: Position) => (p.type === 'fiat' ? `${p.name}` : (p.symbol ?? p.name));
+
+/**
+ * Rows for one account (a wallet) or for all accounts. Each row is split into parts: by account when looking at all
+ * of them, by position (the sub-accounts) when one account is chosen. Days recorded before per-position values were
+ * kept cannot be attributed to an account, so they are left out of an account's view and counted in `missing`.
+ */
+export function viewRows(rows: DayRow[], s: AppState, scope: string): { rows: ViewRow[]; missing: number } {
+  const walletOf = new Map(s.positions.map((p) => [p.id, p.walletId]));
+  const posById = new Map(s.positions.map((p) => [p.id, p]));
+  const wallet = (id: string) => s.wallets.find((w) => w.id === id);
+  const out: ViewRow[] = [];
+  let missing = 0;
+  for (const r of rows) {
+    if (scope === 'all') {
+      const byWallet = new Map<string, number>();
+      for (const [id, v] of Object.entries(r.posPl ?? {})) byWallet.set(walletOf.get(id) ?? 'removed', (byWallet.get(walletOf.get(id) ?? 'removed') ?? 0) + v);
+      const parts = [...byWallet].filter(([, v]) => Math.abs(v) >= 0.005).map(([key, pl]) => ({ key, label: wallet(key)?.name ?? 'Removed', pl }));
+      out.push({ ...r, parts });
+      continue;
+    }
+    if (!r.posPl) { missing++; continue; }
+    const ids = [...new Set([...Object.keys(r.posPl)])].filter((id) => walletOf.get(id) === scope);
+    const sum = (m?: Record<string, number>) => ids.reduce((a, id) => a + (m?.[id] ?? 0), 0);
+    const pl = sum(r.posPl), before = sum(r.posBefore);
+    const parts = ids.filter((id) => Math.abs(r.posPl![id]) >= 0.005).map((id) => ({ key: id, label: posById.get(id) ? positionLabel(posById.get(id)!) : 'Removed', pl: r.posPl![id] }));
+    const cat = wallet(scope)?.category;
+    out.push({
+      ...r, pl, nw: sum(r.posNw), flow: sum(r.posFlow), plPct: before > 0 ? (pl / before) * 100 : 0,
+      byCat: cat && Math.abs(pl) >= 0.005 ? { [cat]: pl } : {},
+      movers: parts.map((p) => ({ id: p.key, pl: p.pl })).sort((x, y) => Math.abs(y.pl) - Math.abs(x.pl)),
+      parts,
+    });
+  }
+  return { rows: out, missing };
+}
+
+/** Totals per part over the rows, biggest effect first. */
+export function partTotals(rows: ViewRow[]): Part[] {
+  const m = new Map<string, Part>();
+  for (const r of rows) for (const p of r.parts) m.set(p.key, { ...p, pl: (m.get(p.key)?.pl ?? 0) + p.pl });
+  return [...m.values()].sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
+}
+
+export function rowsIn<T extends { date: string }>(rows: T[], r: Range): T[] {
   if (r === 'All') return rows;
   const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
   return rows.filter((x) => x.date >= from);
 }
 
-export function dailySummary(rows: DayRow[]) {
+export function dailySummary(rows: Pick<DayRow, 'nw' | 'pl' | 'flow' | 'date' | 'plPct'>[]) {
   if (!rows.length) return null;
   const total = rows.reduce((a, r) => a + r.pl, 0);
   const startNw = rows[0].nw - rows[0].pl - rows[0].flow;
@@ -307,7 +398,7 @@ export function dailySummary(rows: DayRow[]) {
 }
 
 /** Running total of daily gains and losses across the rows. */
-export function cumulativePl(rows: DayRow[]): { date: string; value: number }[] {
+export function cumulativePl(rows: Pick<DayRow, 'pl' | 'date'>[]): { date: string; value: number }[] {
   let acc = 0;
   return rows.map((r) => ({ date: r.date, value: (acc += r.pl) }));
 }

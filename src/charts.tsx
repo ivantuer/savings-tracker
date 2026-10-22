@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { CATEGORIES, categoryColor, categoryLabel, type Category, type Display } from './types';
-import { fmt, fmtCompact, historyRows, type DayRow } from './calc';
+import { fmt, fmtCompact, historyRows, type ViewRow } from './calc';
 
 const sorted = (totals: Record<Category, number>) => CATEGORIES.map((c) => ({ ...c, value: totals[c.id] })).filter((c) => c.value > 0);
 
@@ -148,26 +148,33 @@ export function StackBar({ parts, display }: { parts: { label: string; value: nu
 export const signed = (n: number, d: Display) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n), d)}`;
 const niceStep = (max: number) => { const s = 10 ** Math.floor(Math.log10((max || 1) / 2)); return [1, 2, 2.5, 5, 10].map((m) => m * s).find((x) => max / x <= 3) ?? s * 10; };
 
-/** One bar per day: up for a gain, down for a loss, from a single zero line. Tap or hover a bar for the details. */
-export function DailyBars({ rows, display, onPick, picked }: { rows: DayRow[]; display: Display; onPick?: (date: string) => void; picked?: string | null }) {
+/**
+ * One bar per day from a single zero line: gains stack up, losses stack down. With `colors` each bar is split into its
+ * parts (accounts or sub-accounts); parts without a colour are folded into one grey "Other" segment.
+ */
+export function SplitBars({ rows, display, colors, onPick, picked }: { rows: ViewRow[]; display: Display; colors?: Record<string, string>; onPick?: (date: string) => void; picked?: string | null }) {
   const [hover, setHover] = useState<number | null>(null);
   if (!rows.length) return null;
-  const W = 340, H = 180, L = 42, R = 6, T = 14, B = 20;
-  const max = Math.max(...rows.map((r) => Math.abs(r.pl)), 0.01);
+  const OTHER = 'var(--muted)';
+  // segments per day: [color, value, label]
+  const segs = rows.map((r) => {
+    if (!colors || !r.parts.length) return [{ color: r.pl >= 0 ? 'var(--good)' : 'var(--bad)', v: r.pl, label: 'Total' }];
+    const out: { color: string; v: number; label: string }[] = [];
+    let other = 0;
+    for (const p of r.parts) { if (colors[p.key]) out.push({ color: colors[p.key], v: p.pl, label: p.label }); else other += p.pl; }
+    if (Math.abs(other) >= 0.005) out.push({ color: OTHER, v: other, label: 'Other' });
+    return out;
+  });
+  const W = 340, H = 190, L = 42, R = 6, T = 14, B = 20;
+  const sums = segs.map((s) => ({ up: s.filter((x) => x.v > 0).reduce((a, x) => a + x.v, 0), down: -s.filter((x) => x.v < 0).reduce((a, x) => a + x.v, 0) }));
+  const max = Math.max(...sums.map((s) => Math.max(s.up, s.down)), 0.01);
   const step = niceStep(max), top = Math.ceil(max / step) * step;
   const y = (v: number) => T + (1 - (v + top) / (2 * top)) * (H - T - B);
   const slot = (W - L - R) / rows.length, bw = Math.min(22, Math.max(1.5, slot - 2));
   const x = (i: number) => L + slot * i + (slot - bw) / 2;
-  const zero = y(0), r4 = Math.min(4, bw / 2);
-  const bar = (i: number, v: number) => {
-    const h = Math.max(Math.abs(y(v) - zero), 1), x0 = x(i);
-    // rounded at the data end, square at the zero line
-    return v >= 0
-      ? `M${x0} ${zero} V${zero - h + r4} Q${x0} ${zero - h} ${x0 + r4} ${zero - h} H${x0 + bw - r4} Q${x0 + bw} ${zero - h} ${x0 + bw} ${zero - h + r4} V${zero} Z`
-      : `M${x0} ${zero} V${zero + h - r4} Q${x0} ${zero + h} ${x0 + r4} ${zero + h} H${x0 + bw - r4} Q${x0 + bw} ${zero + h} ${x0 + bw} ${zero + h - r4} V${zero} Z`;
-  };
+  const zero = y(0);
+  const label = rows.length <= 45 && !colors;
   const best = rows.reduce((a, r, i) => (r.pl > rows[a].pl ? i : a), 0), worst = rows.reduce((a, r, i) => (r.pl < rows[a].pl ? i : a), 0);
-  const label = rows.length <= 45;
   const onMove = (e: PointerEvent) => {
     const box = (e.currentTarget as SVGElement).getBoundingClientRect();
     const px = ((e.clientX - box.left) / box.width) * W;
@@ -176,7 +183,7 @@ export function DailyBars({ rows, display, onPick, picked }: { rows: DayRow[]; d
   const h = hover != null ? rows[hover] : null;
   return (
     <div class="chart">
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Profit and loss per day" onPointerMove={onMove} onPointerDown={(e) => { onMove(e); }} onPointerLeave={() => setHover(null)}
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Profit and loss per day" onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}
         onClick={() => hover != null && onPick?.(rows[hover].date)}>
         {[-top, 0, top].map((v) => (
           <g>
@@ -184,9 +191,17 @@ export function DailyBars({ rows, display, onPick, picked }: { rows: DayRow[]; d
             <text x={L - 6} y={y(v) + 4} text-anchor="end" font-size="10" style={{ fill: 'var(--muted)' }}>{v > 0 ? '+' : ''}{fmtCompact(v)}</text>
           </g>
         ))}
-        {rows.map((r, i) => (
-          <path d={bar(i, r.pl)} style={{ fill: r.pl >= 0 ? 'var(--good)' : 'var(--bad)', opacity: hover != null && hover !== i ? 0.45 : picked && picked !== r.date ? 0.55 : 1 }} />
-        ))}
+        {rows.map((r, i) => {
+          let up = 0, down = 0;
+          const dim = hover != null && hover !== i ? 0.45 : picked && picked !== r.date ? 0.55 : 1;
+          const ups = segs[i].filter((s) => s.v > 0).sort((a, b) => b.v - a.v), downs = segs[i].filter((s) => s.v < 0).sort((a, b) => a.v - b.v);
+          return (
+            <g style={{ opacity: dim }}>
+              {ups.map((s, k) => { const y0 = y(up), y1 = y(up + s.v); up += s.v; return <rect x={x(i)} y={y1} width={bw} height={Math.max(y0 - y1 - (ups.length > 1 ? 1 : 0), 1)} rx={k === ups.length - 1 ? 3 : 0} style={{ fill: s.color }} />; })}
+              {downs.map((s, k) => { const y0 = y(-down), y1 = y(-down + s.v); down -= s.v; return <rect x={x(i)} y={y0 + (downs.length > 1 ? 1 : 0)} width={bw} height={Math.max(y1 - y0 - (downs.length > 1 ? 1 : 0), 1)} rx={k === downs.length - 1 ? 3 : 0} style={{ fill: s.color }} />; })}
+            </g>
+          );
+        })}
         {label && [best, worst].filter((i, k, a) => a.indexOf(i) === k).map((i) => (
           <text x={x(i) + bw / 2} y={rows[i].pl >= 0 ? y(rows[i].pl) - 4 : y(rows[i].pl) + 12} text-anchor="middle" font-size="9" style={{ fill: 'var(--ink-2)' }}>{fmtCompact(rows[i].pl)}</text>
         ))}
@@ -196,10 +211,13 @@ export function DailyBars({ rows, display, onPick, picked }: { rows: DayRow[]; d
       {h && (
         <div class="tip" style={{ top: 2, [hover! > rows.length / 2 ? 'left' : 'right']: '6%' }}>
           <div class="muted">{h.date}</div>
-          <div class="r"><span>{h.pl >= 0 ? '▲' : '▼'} Gain / loss</span><b class={`num ${h.pl >= 0 ? 'up' : 'down'}`}>{signed(h.pl, display)}</b></div>
+          {colors && segs[hover!].length > 0 && segs[hover!][0].label !== 'Total' && [...segs[hover!]].sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 6).map((s) => (
+            <div class="r"><span><i class="swatch" style={{ background: s.color }} />{s.label}</span><span class="num">{s.v >= 0 ? '+' : '−'}{fmtCompact(Math.abs(s.v))}</span></div>
+          ))}
+          <div class="r" style={colors ? 'margin-top:4px;border-top:1px solid var(--grid);padding-top:4px' : ''}><span>{h.pl >= 0 ? '▲' : '▼'} Gain / loss</span><b class={`num ${h.pl >= 0 ? 'up' : 'down'}`}>{signed(h.pl, display)}</b></div>
           <div class="r"><span>Change</span><span class="num">{h.plPct >= 0 ? '+' : ''}{h.plPct.toFixed(2)}%</span></div>
           {Math.abs(h.flow) > 0.5 && <div class="r"><span>Added / removed</span><span class="num">{signed(h.flow, display)}</span></div>}
-          <div class="r"><span>Net worth</span><span class="num">{fmt(h.nw, display)}</span></div>
+          <div class="r"><span>Value</span><span class="num">{fmt(h.nw, display)}</span></div>
         </div>
       )}
     </div>
