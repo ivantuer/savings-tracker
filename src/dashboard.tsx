@@ -44,7 +44,7 @@ export function Dashboard({ goWallet }: { goWallet: (id: string) => void }) {
         <div class="hero num">{fmt(total, d)}</div>
         {ch ? (
           <div class={`delta num ${ch.delta >= 0 ? 'up' : 'down'}`}>
-            {ch.delta >= 0 ? '▲' : '▼'} {fmt(Math.abs(ch.delta), d)} ({ch.pct >= 0 ? '+' : ''}{ch.pct.toFixed(1)}%) <span class="muted" style="font-weight:400">since {ch.since}</span>
+            {ch.delta >= 0 ? '▲' : '▼'} {fmt(Math.abs(ch.delta), d)} ({ch.pct >= 0 ? '+' : ''}{ch.pct.toFixed(1)}%) <span class="muted" style="font-weight:400">since {ch.since}{Math.abs(ch.flow) > 0.5 && ` · excludes ${fmt(Math.abs(ch.flow), d)} ${ch.flow > 0 ? 'added' : 'removed'} by you`}</span>
           </div>
         ) : (
           <div class="muted small">Change appears after the next daily snapshot</div>

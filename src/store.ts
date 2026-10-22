@@ -1,8 +1,8 @@
 import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
-import type { AppState, Flow, Position, Wallet } from './types';
+import type { AppState, Flow, Income, Position, Wallet } from './types';
 import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
-import { counts, positionValue, takeSnapshot } from './calc';
+import { counts, nativeValue, positionValue, takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
 
@@ -13,6 +13,7 @@ const empty = (): AppState => ({
   snapshots: [],
   tombstones: {},
   flows: [],
+  income: [],
   settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market', theme: 'auto' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
@@ -71,7 +72,7 @@ export async function init() {
   void refresh();
 }
 
-export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[] }) {
+export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[]; income: Income[] }) {
   state.value = { ...state.value, ...d };
 }
 
@@ -141,7 +142,10 @@ export const deleteWallet = (id: string) => {
   hooks.dataChanged();
 };
 
-export function upsertPosition(p: Position) {
+/** How a change by hand should be counted. A dividend raises the balance without being money you put in. */
+export interface EditKind { dividend?: { sourceId?: string; usd?: number } }
+
+export function upsertPosition(p: Position, kind?: EditKind) {
   const prev = state.value.positions.find((x) => x.id === p.id);
   const trackable = p.type === 'manual' || p.type === 'bond';
   if (trackable) {
@@ -151,7 +155,13 @@ export function upsertPosition(p: Position) {
       p = { ...p, history: [...(prev?.history ?? p.history ?? []), { date: new Date().toISOString(), value }] };
     } else p = { ...p, history: prev?.history };
   }
-  addFlows([flowFor(prev, p)]);
+  const dividend = kind?.dividend && prev && p.quantity > prev.quantity;
+  if (dividend) {
+    const flow = flowFor(prev, p);
+    const category = state.value.wallets.find((w) => w.id === p.walletId)?.category;
+    const usd = kind!.dividend!.usd ?? flow?.usd ?? 0;
+    if (usd > 0.005) state.value = { ...state.value, income: [...state.value.income, { id: uid(), at: new Date().toISOString(), usd: Math.round(usd * 100) / 100, positionId: p.id, sourceId: kind!.dividend!.sourceId, category }] };
+  } else addFlows([flowFor(prev, p)]);
   update((s) => ({ ...s, positions: s.positions.some((x) => x.id === p.id) ? s.positions.map((x) => (x.id === p.id ? p : x)) : [...s.positions, p] }));
   if (p.type === 'crypto' || p.type === 'stock') void fetchPrices(state.value).then((prices) => update((s) => ({ ...s, prices })));
   saveSnapshot();
@@ -171,4 +181,27 @@ export function importJson(text: string) {
   state.value = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
   hooks.dataChanged();
   void refresh();
+}
+
+/**
+ * Record a dividend that was reinvested: `amount` is in the position's own value currency (hryvnia for an Inzhur fund,
+ * dollars for a coin or stock) and buys more units at the current price.
+ */
+export function recordDividend(positionId: string, amount: number) {
+  const p = state.value.positions.find((x) => x.id === positionId);
+  if (!p || !(amount > 0)) return false;
+  const unit = p.quantity !== 0 ? (valueIn(p) / p.quantity) : 0;
+  if (!(unit > 0)) return false;
+  const usdPerNative = valueUsd(p) / valueIn(p);
+  upsertPosition({ ...p, quantity: p.quantity + amount / unit, updatedAt: new Date().toISOString() }, { dividend: { usd: amount * usdPerNative } });
+  return true;
+}
+
+/** Value of a position in its own value currency, and in USD. */
+const valueIn = (p: Position) => nativeValue(p, state.value)?.amount ?? 0;
+const valueUsd = (p: Position) => positionValue(p, state.value, 'USD') ?? 0;
+
+export function deleteIncome(id: string) {
+  state.value = { ...state.value, income: state.value.income.filter((i) => i.id !== id), tombstones: { ...state.value.tombstones, [id]: new Date().toISOString() } };
+  hooks.dataChanged();
 }

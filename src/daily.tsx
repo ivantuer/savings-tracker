@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
-import { state } from './store';
+import { deleteIncome, state } from './store';
 import { CATEGORIES, categoryColor, type Category } from './types';
-import { RANGES, cumulativePl, dailyRows, dailySummary, fmtCompact, partTotals, rowsIn, topMovers, viewRows, positionLabel, fmt, type Range, type ViewRow } from './calc';
-import { CumulativeLine, SplitBars, signed } from './charts';
+import { RANGES, cumulativePl, dailyRows, dailySummary, dividendStats, fmtCompact, partTotals, rowsIn, topMovers, viewRows, positionLabel, fmt, type Range, type ViewRow } from './calc';
+import { CumulativeLine, MonthBars, SplitBars, signed } from './charts';
 
 const sign = (n: number) => (n >= 0 ? 'up' : 'down');
 const arrow = (n: number) => (n >= 0 ? '▲' : '▼');
@@ -35,13 +35,16 @@ export function DailyView() {
 
   if (!all.length)
     return (
-      <div class="card">
-        <h2>Daily gains and losses</h2>
-        <p class="muted">
-          This builds up from the days you open the app: one snapshot a day, so the first day-to-day numbers appear after your second day. Money you add or remove by hand is kept apart from market moves, so a deposit never looks like a profit.
-        </p>
-        <p class="muted small">Snapshots so far: {s.snapshots.length}</p>
-      </div>
+      <>
+        <div class="card">
+          <h2>Daily gains and losses</h2>
+          <p class="muted">
+            This builds up from the days you open the app: one snapshot a day, so the first day-to-day numbers appear after your second day. Money you add or remove by hand is kept apart from market moves, so a deposit never looks like a profit.
+          </p>
+          <p class="muted small">Snapshots so far: {s.snapshots.length}</p>
+        </div>
+        <Dividends />
+      </>
     );
 
   // colours by rank within what is on screen
@@ -84,6 +87,9 @@ export function DailyView() {
               {title} · <span class={`num ${sign(sum.totalPct)}`}>{sum.totalPct >= 0 ? '+' : ''}{sum.totalPct.toFixed(2)}%</span> over {sum.days} {sum.days === 1 ? 'day' : 'days'}, market moves only
               {Math.abs(sum.flow) > 0.5 && <> · money added or removed: <span class="num">{signed(sum.flow, d)}</span></>}
             </div>
+            {sum.dividends > 0.5 && (
+              <div class="row small" style="margin-top:8px;gap:16px"><span>Price changes <b class={`num ${sign(sum.total - sum.dividends)}`}>{signed(sum.total - sum.dividends, d)}</b></span><span>Dividends <b class="num up">{signed(sum.dividends, d)}</b></span></div>
+            )}
           </>
         ) : <p class="muted small" style="margin-top:10px">No days in this range yet.</p>}
       </div>
@@ -159,6 +165,8 @@ export function DailyView() {
         </div>
       )}
 
+      <Dividends />
+
       <div class="card">
         <h2>Day by day · {title}</h2>
         {list.slice(0, shown).map((r) => <DayItem r={r} open={open === r.date} toggle={() => setOpen(open === r.date ? null : r.date)} colorFor={colorFor} />)}
@@ -179,7 +187,7 @@ function DayItem({ r, open, toggle, colorFor }: { r: ViewRow; open: boolean; tog
       <div class="item" style="border-top:0" onClick={toggle}>
         <div class="l">
           <div>{r.date}</div>
-          <div class="muted small num">{fmt(r.nw, d)}{Math.abs(r.flow) > 0.5 ? ` · ${r.flow > 0 ? 'added' : 'removed'} ${fmt(Math.abs(r.flow), d)}` : ''}</div>
+          <div class="muted small num">{fmt(r.nw, d)}{Math.abs(r.flow) > 0.5 ? ` · ${r.flow > 0 ? 'added' : 'removed'} ${fmt(Math.abs(r.flow), d)}` : ''}{r.income > 0.5 ? ` · incl. dividends ${fmt(r.income, d)}` : ''}</div>
         </div>
         <div class={`r num ${sign(r.pl)}`}>
           <b>{arrow(r.pl)} {signed(r.pl, d)}</b>
@@ -200,6 +208,43 @@ function DayItem({ r, open, toggle, colorFor }: { r: ViewRow; open: boolean; tog
           )}
           {parts.length === 0 && cats.length === 0 && <p class="muted small" style="margin:0">No detail recorded for this day.</p>}
         </div>
+      )}
+    </div>
+  );
+}
+
+function Dividends() {
+  const s = state.value;
+  const d = s.settings.display;
+  const st = dividendStats(s, d);
+  const [all, setAll] = useState(false);
+  return (
+    <div class="card">
+      <h2>Dividends</h2>
+      {st.items.length === 0 ? (
+        <p class="muted small" style="margin:0">
+          Nothing recorded yet. When a dividend arrives, open the position and use "Record a reinvested dividend", or raise the amount and choose "Dividend / income". It then counts as profit and shows up here.
+        </p>
+      ) : (
+        <>
+          <div class="row between" style="margin-bottom:6px">
+            <div><div class="tile-label">Received so far</div><div class="tile-value num up">{fmt(st.total, d)}</div></div>
+            <div style="text-align:right"><div class="tile-label">Average per month</div><div class="tile-value num">{fmt(st.avgPerMonth, d)}</div></div>
+          </div>
+          <MonthBars months={st.months} display={d} />
+          <div class="muted small" style="margin:10px 0 4px">By source</div>
+          {st.bySource.map((x) => (
+            <div class="row between small" style="padding:3px 0"><span>{x.label} <span class="muted">· {x.count}×</span></span><span class="num up">{fmt(x.value, d)}</span></div>
+          ))}
+          <div class="muted small" style="margin:10px 0 4px">Entries</div>
+          {(all ? st.items : st.items.slice(0, 6)).map((i) => (
+            <div class="row between small" style="padding:4px 0">
+              <span class="muted">{i.at.slice(0, 10)}</span>
+              <span class="row" style="gap:10px"><span class="num up">+{fmt(i.value, d)}</span><button class="link" aria-label="Delete entry" onClick={() => { if (confirm('Delete this dividend entry? Your balance stays as it is.')) deleteIncome(i.id); }}>✕</button></span>
+            </div>
+          ))}
+          {st.items.length > 6 && <button class="ghost" style="width:100%;margin-top:8px" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${st.items.length}`}</button>}
+        </>
       )}
     </div>
   );

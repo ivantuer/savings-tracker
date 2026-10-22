@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
-import { deleteWallet, deletePosition, uid, upsertPosition, upsertWallet } from './store';
+import { deleteWallet, deletePosition, recordDividend, state, uid, upsertPosition, upsertWallet } from './store';
 import { addDays } from './calc';
 import { fetchBondQuotes, INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
@@ -63,6 +63,9 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [lookupMsg, setLookupMsg] = useState('');
   const [coupon, setCoupon] = useState(position?.bond?.couponRate != null ? String(position.bond.couponRate) : '');
   const [maturity, setMaturity] = useState(position?.bond?.maturity ?? '');
+  const [kind, setKind] = useState<'buy' | 'dividend'>('buy');
+  const [sourceId, setSourceId] = useState('');
+  const [divAmount, setDivAmount] = useState('');
   const [onCredit, setOnCredit] = useState(!!position?.credit);
   const [bank, setBank] = useState(position?.credit?.bank ?? '');
   const [owed, setOwed] = useState(position?.credit ? String(position.credit.owed) : '');
@@ -97,6 +100,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
     (type !== 'bond' || num(face) != null) &&
     (!onCredit || !!sellBy);
 
+  const increased = !!position && quantity != null && !Number.isNaN(quantity) && quantity > position.quantity;
   const save = () => {
     if (!valid) return;
     const faceN = num(face) ?? 0;
@@ -117,7 +121,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       history: position?.history,
       updatedAt: new Date().toISOString(),
     };
-    upsertPosition(p);
+    upsertPosition(p, increased && kind === 'dividend' ? { dividend: { sourceId: sourceId || undefined } } : undefined);
     onClose();
   };
 
@@ -154,6 +158,22 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       )}
       <label>{qtyLabel}</label>
       <input inputMode="decimal" value={qty} onInput={(e) => setQty(e.currentTarget.value)} />
+      {increased && (
+        <>
+          <label>This increase is</label>
+          <div class="seg" style="display:flex"><button style="flex:1" class={kind === 'buy' ? 'on' : ''} onClick={() => setKind('buy')}>Bought with my money</button><button style="flex:1" class={kind === 'dividend' ? 'on' : ''} onClick={() => setKind('dividend')}>Dividend / income</button></div>
+          <p class="muted small" style="margin:6px 0 0">{kind === 'buy' ? 'Counted as money you added, so it is left out of gains and losses.' : 'Counted as profit and added to your dividends.'}</p>
+          {kind === 'dividend' && type === 'fiat' && (
+            <>
+              <label>Paid by (optional)</label>
+              <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
+                <option value="">Not specified</option>
+                {state.value.positions.filter((x) => x.type !== 'fiat' && x.id !== position!.id).map((x) => <option value={x.id}>{x.symbol ?? x.name}{state.value.wallets.find((w) => w.id === x.walletId) ? ` · ${state.value.wallets.find((w) => w.id === x.walletId)!.name}` : ''}</option>)}
+              </select>
+            </>
+          )}
+        </>
+      )}
       {type === 'manual' && (
         <>
           <label>Live price from inzhur.reit</label>
@@ -203,6 +223,16 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
               </div>
             </>
           )}
+        </>
+      )}
+      {position && (type === 'manual' || type === 'crypto' || type === 'stock') && (
+        <>
+          <label>Record a reinvested dividend ({type === 'manual' ? cur : 'USD'})</label>
+          <div class="row">
+            <input inputMode="decimal" value={divAmount} placeholder="Amount received" onInput={(e) => setDivAmount(e.currentTarget.value)} />
+            <button class="ghost" disabled={!(num(divAmount)! > 0)} onClick={() => { if (recordDividend(position.id, num(divAmount)!)) onClose(); }}>Add</button>
+          </div>
+          <p class="muted small" style="margin:6px 0 0">Buys more {type === 'manual' ? 'certificates' : 'units'} at the current price and counts it as profit.</p>
         </>
       )}
       <label>{costLabel}</label>

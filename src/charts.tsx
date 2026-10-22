@@ -145,7 +145,7 @@ export function StackBar({ parts, display }: { parts: { label: string; value: nu
   );
 }
 
-export const signed = (n: number, d: Display) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n), d)}`;
+export const signed = (n: number, d: Display) => `${n >= 0 || Math.abs(n) < 0.005 ? '+' : '−'}${fmt(Math.abs(n), d)}`;
 const niceStep = (max: number) => { const s = 10 ** Math.floor(Math.log10((max || 1) / 2)); return [1, 2, 2.5, 5, 10].map((m) => m * s).find((x) => max / x <= 3) ?? s * 10; };
 
 /**
@@ -262,5 +262,30 @@ export function CumulativeLine({ points, display }: { points: { date: string; va
         </div>
       )}
     </div>
+  );
+}
+
+/** Dividends received per month, last twelve months. */
+export function MonthBars({ months, display }: { months: { month: string; value: number }[]; display: Display }) {
+  const W = 340, H = 120, L = 6, R = 6, T = 16, B = 18;
+  const max = Math.max(...months.map((m) => m.value), 0.01);
+  const slot = (W - L - R) / months.length, bw = Math.min(18, slot - 6);
+  const y = (v: number) => T + (1 - v / max) * (H - T - B);
+  const name = (m: string) => new Date(`${m}-15T12:00:00`).toLocaleString('en', { month: 'short' });
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Dividends per month">
+      <line x1={L} x2={W - R} y1={H - B} y2={H - B} style={{ stroke: 'var(--axis)' }} stroke-width="1" />
+      {months.map((m, i) => {
+        const x = L + slot * i + (slot - bw) / 2, h = Math.max(H - B - y(m.value), m.value > 0 ? 2 : 0);
+        return (
+          <g>
+            <title>{m.month}: {fmt(m.value, display)}</title>
+            {m.value > 0 && <path d={`M${x} ${H - B} V${H - B - h + 3} Q${x} ${H - B - h} ${x + 3} ${H - B - h} H${x + bw - 3} Q${x + bw} ${H - B - h} ${x + bw} ${H - B - h + 3} V${H - B} Z`} style={{ fill: 'var(--c-inzhur)' }} />}
+            {m.value > 0 && <text x={x + bw / 2} y={H - B - h - 3} text-anchor="middle" font-size="8" style={{ fill: 'var(--ink-2)' }}>{fmtCompact(m.value)}</text>}
+            <text x={x + bw / 2} y={H - 5} text-anchor="middle" font-size="8" style={{ fill: 'var(--muted)' }}>{name(m.month)}</text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }

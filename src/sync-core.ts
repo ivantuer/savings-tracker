@@ -1,5 +1,5 @@
 // Encrypted sync with the Savings Tracker Worker. Pure functions (no DOM, no UI state) so they can be tested in Node.
-import type { Flow, Position, Snapshot, Wallet } from './types';
+import type { Flow, Income, Position, Snapshot, Wallet } from './types';
 
 export interface SyncData {
   wallets: Wallet[];
@@ -7,6 +7,7 @@ export interface SyncData {
   snapshots: Snapshot[];
   tombstones: Record<string, string>;
   flows: Flow[];
+  income: Income[];
 }
 
 /** The data key (`key`), encrypted under the passkey-derived key, so another device with the same passkey can open the vault. */
@@ -62,7 +63,7 @@ export async function decrypt(v: Vault, iv: string, blob: string): Promise<SyncD
   try {
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await aes(v.key), unb64(blob));
     const d = JSON.parse(td.decode(pt)) as Partial<SyncData>;
-    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {}, flows: d.flows ?? [] };
+    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {}, flows: d.flows ?? [], income: d.income ?? [] };
   } catch {
     throw new Error('Could not decrypt the synced data');
   }
@@ -100,7 +101,8 @@ export function mergeData(a: SyncData, b: SyncData): SyncData {
   const positions = byKey(a.positions, b.positions, (p) => p.id).filter(alive).filter((p) => ids.has(p.walletId));
   const snapshots = byKey(a.snapshots, b.snapshots, (s) => s.date).sort((x, y) => x.date.localeCompare(y.date));
   const flows = byKey(a.flows ?? [], b.flows ?? [], (x) => x.id).sort((x, y) => x.at.localeCompare(y.at));
-  return { wallets, positions, snapshots, tombstones, flows };
+  const income = byKey(a.income ?? [], b.income ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at));
+  return { wallets, positions, snapshots, tombstones, flows, income };
 }
 
 /** Stable form for comparing two datasets regardless of ordering. */
@@ -112,6 +114,7 @@ export function canon(d: SyncData): string {
     s: sortBy(d.snapshots, (x) => x.date),
     t: Object.entries(d.tombstones).sort(),
     f: sortBy(d.flows ?? [], (x) => x.id),
+    i: sortBy(d.income ?? [], (x) => x.id),
   });
 }
 

@@ -242,14 +242,21 @@ export function snapshotsIn(s: AppState, r: Range): Snapshot[] {
   return before ? [before, ...inside] : inside;
 }
 
-/** Change of net worth over the range, against the snapshot at (or just before) its start. */
+/**
+ * Change of net worth over the range, against the snapshot at (or just before) its start. Money you added or removed by
+ * hand since then is taken out, so it measures capitalization and dividends only.
+ */
 export function periodChange(s: AppState, to: Display, r: Range) {
   const snaps = snapshotsIn(s, r);
   const base = snaps[0];
   if (!base || base.date === new Date().toISOString().slice(0, 10)) return null;
   const was = snapshotValue(base, to);
-  const delta = netWorth(s, to) - was;
-  return { delta, pct: was > 0 ? (delta / was) * 100 : 0, since: base.date };
+  const rates = ratesOf(s);
+  const flow = s.flows
+    .filter((f) => !f.id.startsWith('credit-excl-') && f.at > endOf(base))
+    .reduce((a, f) => a + convert(f.usd, 'USD', to, rates), 0);
+  const delta = netWorth(s, to) - was - flow;
+  return { delta, pct: was > 0 ? (delta / was) * 100 : 0, since: base.date, flow };
 }
 
 /** Per-category history in the display currency (category split is stored in USD, scaled to the snapshot's total). */
@@ -282,6 +289,9 @@ export interface DayRow {
   posNw?: Record<string, number>;
   posBefore?: Record<string, number>;
   posFlow?: Record<string, number>;
+  /** dividends and other income received that day (already part of the gain) */
+  income: number;
+  posIncome?: Record<string, number>;
 }
 
 const endOf = (sn: Snapshot) => sn.at ?? `${sn.date}T23:59:59Z`;
@@ -300,6 +310,10 @@ export function dailyRows(s: AppState, to: Display): DayRow[] {
     const kPrev = scale(prev), kCur = scale(cur);
     const inDay = flows.filter((f) => f.at > endOf(prev) && f.at <= endOf(cur));
     const flow = inDay.reduce((a, f) => a + f.usd * kCur, 0);
+    const incomeDay = (s.income ?? []).filter((x) => x.at > endOf(prev) && x.at <= endOf(cur));
+    const income = incomeDay.reduce((a, x) => a + x.usd * kCur, 0);
+    const posIncome: Record<string, number> = {};
+    for (const x of incomeDay) posIncome[x.positionId] = (posIncome[x.positionId] ?? 0) + x.usd * kCur;
     const nw = snapshotValue(cur, to), before = snapshotValue(prev, to);
     const pl = nw - before - flow;
 
@@ -322,7 +336,7 @@ export function dailyRows(s: AppState, to: Display): DayRow[] {
       }
       movers.sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
     }
-    rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers, posPl, posNw, posBefore, posFlow });
+    rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers, posPl, posNw, posBefore, posFlow, income, posIncome });
   }
   return rows;
 }
@@ -355,10 +369,11 @@ export function viewRows(rows: DayRow[], s: AppState, scope: string): { rows: Vi
     const ids = [...new Set([...Object.keys(r.posPl)])].filter((id) => walletOf.get(id) === scope);
     const sum = (m?: Record<string, number>) => ids.reduce((a, id) => a + (m?.[id] ?? 0), 0);
     const pl = sum(r.posPl), before = sum(r.posBefore);
+    const incomeHere = ids.reduce((a, id) => a + (r.posIncome?.[id] ?? 0), 0);
     const parts = ids.filter((id) => Math.abs(r.posPl![id]) >= 0.005).map((id) => ({ key: id, label: posById.get(id) ? positionLabel(posById.get(id)!) : 'Removed', pl: r.posPl![id] }));
     const cat = wallet(scope)?.category;
     out.push({
-      ...r, pl, nw: sum(r.posNw), flow: sum(r.posFlow), plPct: before > 0 ? (pl / before) * 100 : 0,
+      ...r, pl, income: incomeHere, nw: sum(r.posNw), flow: sum(r.posFlow), plPct: before > 0 ? (pl / before) * 100 : 0,
       byCat: cat && Math.abs(pl) >= 0.005 ? { [cat]: pl } : {},
       movers: parts.map((p) => ({ id: p.key, pl: p.pl })).sort((x, y) => Math.abs(y.pl) - Math.abs(x.pl)),
       parts,
@@ -380,7 +395,7 @@ export function rowsIn<T extends { date: string }>(rows: T[], r: Range): T[] {
   return rows.filter((x) => x.date >= from);
 }
 
-export function dailySummary(rows: Pick<DayRow, 'nw' | 'pl' | 'flow' | 'date' | 'plPct'>[]) {
+export function dailySummary(rows: Pick<DayRow, 'nw' | 'pl' | 'flow' | 'date' | 'plPct' | 'income'>[]) {
   if (!rows.length) return null;
   const total = rows.reduce((a, r) => a + r.pl, 0);
   const startNw = rows[0].nw - rows[0].pl - rows[0].flow;
@@ -394,6 +409,8 @@ export function dailySummary(rows: Pick<DayRow, 'nw' | 'pl' | 'flow' | 'date' | 
     worst: sorted[sorted.length - 1],
     winRate: (rows.filter((r) => r.pl > 0).length / rows.length) * 100,
     flow: rows.reduce((a, r) => a + r.flow, 0),
+    /** of the total, what came as dividends or other income; the rest is capitalization */
+    dividends: rows.reduce((a, r) => a + r.income, 0),
   };
 }
 
@@ -408,4 +425,32 @@ export function topMovers(rows: DayRow[]): { id: string; pl: number }[] {
   const sum = new Map<string, number>();
   for (const r of rows) for (const m of r.movers) sum.set(m.id, (sum.get(m.id) ?? 0) + m.pl);
   return [...sum].map(([id, pl]) => ({ id, pl })).sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
+}
+
+// ---- dividends -------------------------------------------------------------------------------------------------------
+
+/** Dividends and income received, totals by month and by source, in the display currency at current rates. */
+export function dividendStats(s: AppState, to: Display) {
+  const rates = ratesOf(s);
+  const posById = new Map(s.positions.map((p) => [p.id, p]));
+  const items = [...(s.income ?? [])].sort((a, b) => b.at.localeCompare(a.at)).map((i) => ({ ...i, value: convert(i.usd, 'USD', to, rates) }));
+  const total = items.reduce((a, i) => a + i.value, 0);
+  const now = new Date();
+  const months: { month: string; value: number }[] = [];
+  for (let k = 11; k >= 0; k--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    months.push({ month: key, value: items.filter((i) => i.at.slice(0, 7) === key).reduce((a, i) => a + i.value, 0) });
+  }
+  const first = items.at(-1);
+  const spanMonths = first ? Math.max(1, (now.getFullYear() - new Date(first.at).getFullYear()) * 12 + now.getMonth() - new Date(first.at).getMonth() + 1) : 1;
+  const bySource = new Map<string, { id: string; label: string; value: number; count: number }>();
+  for (const i of items) {
+    const id = i.sourceId ?? i.positionId;
+    const p = posById.get(id);
+    const label = p ? `${positionLabel(p)}${s.wallets.find((w) => w.id === p.walletId) ? ` · ${s.wallets.find((w) => w.id === p.walletId)!.name}` : ''}` : 'Removed position';
+    const cur = bySource.get(id) ?? { id, label, value: 0, count: 0 };
+    bySource.set(id, { ...cur, value: cur.value + i.value, count: cur.count + 1 });
+  }
+  return { total, avgPerMonth: total / spanMonths, months, items, bySource: [...bySource.values()].sort((a, b) => b.value - a.value) };
 }

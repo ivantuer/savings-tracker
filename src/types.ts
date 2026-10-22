@@ -50,6 +50,18 @@ export interface Snapshot {
   byPosition?: Record<string, number>;
 }
 
+/** A dividend or other income received: it counts as profit, unlike money you add yourself. */
+export interface Income {
+  id: string;
+  at: string;
+  usd: number;
+  /** the position whose balance grew (the certificates it was reinvested into, or the cash it was paid to) */
+  positionId: string;
+  /** the position that paid it, when that differs (for example REIT paying out to a cash account) */
+  sourceId?: string;
+  category?: Category;
+}
+
 /** Money moved in or out of a position by hand (a deposit, withdrawal, new or removed position): not a market gain or loss. */
 export interface Flow {
   id: string;
@@ -104,6 +116,7 @@ export interface AppState {
   /** ids of deleted wallets and positions, so a deletion survives a sync (id -> when) */
   tombstones: Record<string, string>;
   flows: Flow[];
+  income: Income[];
   settings: Settings;
   rates: Rates;
   prices: Prices;
