@@ -24,7 +24,7 @@ export function WalletView({ wallet, back }: { wallet: Wallet; back: () => void 
         <div class="total num">{fmt(walletTotal(wallet.id, s, d), d)}</div>
       </div>
       <div class="card">
-        <div class="row between"><h2 style="margin:0">Positions</h2><button class="primary" onClick={() => setEditing('new')}>+ Add</button></div>
+        <div class="row between" style="margin-bottom:12px"><h2 style="margin:0">Positions</h2><button class="primary" onClick={() => setEditing('new')}>+ Add</button></div>
         {!positions.length && <p class="muted">Nothing here yet.</p>}
         {positions.map((p) => {
           const v = positionValue(p, s, d);
