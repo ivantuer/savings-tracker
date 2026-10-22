@@ -142,7 +142,8 @@ function CreditCard({ goWallet }: { goWallet: (id: string) => void }) {
   const value = rows.reduce((a, r) => a + r.value, 0);
   return (
     <div class="card">
-      <h2>Credit-funded ОВДП</h2>
+      <h2 style="margin-bottom:2px">Credit-funded ОВДП</h2>
+      <div class="muted small" style="margin-bottom:8px">Not counted in net worth until you cash out.</div>
       <div class="muted small" style="margin-bottom:6px">
         Worth <span class="num">{fmt(value, d)}</span> · owed <span class="num">{fmt(owed, d)}</span> · if sold now <b class={`num ${value - owed >= 0 ? 'up' : 'down'}`}>{value - owed >= 0 ? '▲ +' : '▼ −'}{fmt(Math.abs(value - owed), d)}</b>
       </div>

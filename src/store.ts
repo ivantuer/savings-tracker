@@ -2,7 +2,7 @@ import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
 import type { AppState, Flow, Position, Wallet } from './types';
 import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
-import { positionValue, takeSnapshot } from './calc';
+import { counts, positionValue, takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
 
@@ -26,6 +26,8 @@ export const refreshError = signal('');
 export const uid = () => crypto.randomUUID();
 
 const usdValue = (p: Position) => positionValue(p, state.value, 'USD') ?? 0;
+/** What a position adds to net worth: credit-funded bonds add nothing. */
+const nwValue = (p?: Position) => (p && counts(p) ? usdValue(p) : 0);
 
 /**
  * USD moved by hand when `prev` became `next`: the change in quantity valued at the new price. A change in price or
@@ -35,8 +37,10 @@ function flowFor(prev: Position | undefined, next: Position | undefined): Flow |
   const ref = next ?? prev;
   if (!ref) return null;
   let usd: number;
-  if (!next) usd = -usdValue(prev!);
-  else if (!prev) usd = usdValue(next);
+  if (!next) usd = -nwValue(prev);
+  else if (!prev) usd = nwValue(next);
+  // entering or leaving net worth (credit flag switched): the whole value moves in or out
+  else if (prev.credit || next.credit) usd = nwValue(next) - nwValue(prev);
   else {
     const unit = next.quantity !== 0 ? usdValue(next) / next.quantity : prev.quantity !== 0 ? usdValue(prev) / prev.quantity : 0;
     usd = (next.quantity - prev.quantity) * unit;
@@ -58,12 +62,33 @@ export async function init() {
   const saved = await get<AppState>(KEY);
   if (saved) state.value = { ...empty(), ...saved, settings: { ...empty().settings, ...saved.settings } };
   applyTheme(state.value.settings.theme);
+  leaveCreditOutOfHistory();
   ready.value = true;
   effect(() => {
     if (ready.value) void set(KEY, JSON.parse(JSON.stringify(state.value)));
   });
   watchVisibility();
   void refresh();
+}
+
+/**
+ * Credit-funded bonds used to count towards net worth. If the last snapshot still includes one, record that value as
+ * money leaving the total, so removing it never shows up as a loss in the daily numbers. The id is fixed per position,
+ * so two devices doing this produce the same record and it merges into one.
+ */
+function leaveCreditOutOfHistory() {
+  const last = state.value.snapshots.at(-1);
+  if (!last?.byPosition) return;
+  const have = new Set(state.value.flows.map((f) => f.id));
+  const add: Flow[] = [];
+  for (const p of state.value.positions) {
+    const counted = last.byPosition[p.id];
+    const id = `credit-excl-${p.id}`;
+    if (!p.credit || counted == null || have.has(id)) continue;
+    const category = state.value.wallets.find((w) => w.id === p.walletId)?.category;
+    add.push({ id, at: new Date().toISOString(), usd: -counted, positionId: p.id, category });
+  }
+  if (add.length) state.value = { ...state.value, flows: [...state.value.flows, ...add] };
 }
 
 export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[] }) {

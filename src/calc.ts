@@ -61,6 +61,9 @@ export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cu
   }
 }
 
+/** Bonds bought with credit money are tracked on their own and left out of net worth until they are cashed out. */
+export const counts = (p: Position) => !p.credit;
+
 export function positionValue(p: Position, s: AppState, to: Display): number | null {
   const v = nativeValue(p, s);
   return v ? convert(v.amount, v.cur, to, ratesOf(s)) : null;
@@ -75,7 +78,7 @@ export function positionCost(p: Position, s: AppState, to: Display): number | nu
 
 export function walletTotal(walletId: string, s: AppState, to: Display): number {
   return s.positions
-    .filter((p) => p.walletId === walletId)
+    .filter((p) => p.walletId === walletId && counts(p))
     .reduce((sum, p) => sum + (positionValue(p, s, to) ?? 0), 0);
 }
 
@@ -83,7 +86,7 @@ export function categoryTotals(s: AppState, to: Display): Record<Category, numbe
   const out: Record<Category, number> = { cash: 0, crypto: 0, stocks: 0, inzhur: 0, ovdp: 0 };
   for (const p of s.positions) {
     const w = s.wallets.find((x) => x.id === p.walletId);
-    if (!w) continue;
+    if (!w || !counts(p)) continue;
     out[w.category] += positionValue(p, s, to) ?? 0;
   }
   return out;
@@ -100,7 +103,7 @@ export function takeSnapshot(s: AppState): Snapshot {
     uah: netWorth(s, 'UAH'),
     usdt: netWorth(s, 'USDT'),
     byCategory: categoryTotals(s, 'USD'),
-    byPosition: Object.fromEntries(s.positions.flatMap((p) => { const v = positionValue(p, s, 'USD'); return v == null ? [] : [[p.id, Math.round(v * 100) / 100]]; })),
+    byPosition: Object.fromEntries(s.positions.filter(counts).flatMap((p) => { const v = positionValue(p, s, 'USD'); return v == null ? [] : [[p.id, Math.round(v * 100) / 100]]; })),
   };
 }
 
@@ -164,7 +167,7 @@ export function holdings(s: AppState, to: Display): Holding[] {
   for (const p of s.positions) {
     const wallet = s.wallets.find((w) => w.id === p.walletId);
     const value = positionValue(p, s, to);
-    if (!wallet || value == null) continue;
+    if (!wallet || value == null || !counts(p)) continue;
     const cost = positionCost(p, s, to);
     out.push({ position: p, wallet, value, cost, pnl: cost != null && cost > 0 ? value - cost : null });
   }
@@ -182,7 +185,7 @@ export function pnlSummary(s: AppState, to: Display) {
 /** Where the money is denominated: hryvnia, euro, or dollar-linked (USD, USDT, crypto, tokenized stocks). */
 export function exposure(s: AppState, to: Display): { uah: number; usd: number; eur: number } {
   const out = { uah: 0, usd: 0, eur: 0 };
-  for (const p of s.positions) {
+  for (const p of s.positions.filter(counts)) {
     const v = positionValue(p, s, to);
     if (v == null) continue;
     const cur = p.type === 'crypto' || p.type === 'stock' ? 'USD' : (p.currency ?? 'UAH');
