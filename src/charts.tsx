@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { CATEGORIES, categoryColor, categoryLabel, type Category, type Display } from './types';
-import { fmt, fmtCompact, historyRows } from './calc';
+import { fmt, fmtCompact, historyRows, type DayRow } from './calc';
 
 const sorted = (totals: Record<Category, number>) => CATEGORIES.map((c) => ({ ...c, value: totals[c.id] })).filter((c) => c.value > 0);
 
@@ -141,6 +141,108 @@ export function StackBar({ parts, display }: { parts: { label: string; value: nu
           <span class="row small" style="gap:6px"><i class="swatch" style={{ background: p.color }} /><span class="muted">{p.label}</span><b class="num">{Math.round((p.value / sum) * 100)}%</b></span>
         ))}
       </div>
+    </div>
+  );
+}
+
+export const signed = (n: number, d: Display) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n), d)}`;
+const niceStep = (max: number) => { const s = 10 ** Math.floor(Math.log10((max || 1) / 2)); return [1, 2, 2.5, 5, 10].map((m) => m * s).find((x) => max / x <= 3) ?? s * 10; };
+
+/** One bar per day: up for a gain, down for a loss, from a single zero line. Tap or hover a bar for the details. */
+export function DailyBars({ rows, display, onPick, picked }: { rows: DayRow[]; display: Display; onPick?: (date: string) => void; picked?: string | null }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (!rows.length) return null;
+  const W = 340, H = 180, L = 42, R = 6, T = 14, B = 20;
+  const max = Math.max(...rows.map((r) => Math.abs(r.pl)), 0.01);
+  const step = niceStep(max), top = Math.ceil(max / step) * step;
+  const y = (v: number) => T + (1 - (v + top) / (2 * top)) * (H - T - B);
+  const slot = (W - L - R) / rows.length, bw = Math.min(22, Math.max(1.5, slot - 2));
+  const x = (i: number) => L + slot * i + (slot - bw) / 2;
+  const zero = y(0), r4 = Math.min(4, bw / 2);
+  const bar = (i: number, v: number) => {
+    const h = Math.max(Math.abs(y(v) - zero), 1), x0 = x(i);
+    // rounded at the data end, square at the zero line
+    return v >= 0
+      ? `M${x0} ${zero} V${zero - h + r4} Q${x0} ${zero - h} ${x0 + r4} ${zero - h} H${x0 + bw - r4} Q${x0 + bw} ${zero - h} ${x0 + bw} ${zero - h + r4} V${zero} Z`
+      : `M${x0} ${zero} V${zero + h - r4} Q${x0} ${zero + h} ${x0 + r4} ${zero + h} H${x0 + bw - r4} Q${x0 + bw} ${zero + h} ${x0 + bw} ${zero + h - r4} V${zero} Z`;
+  };
+  const best = rows.reduce((a, r, i) => (r.pl > rows[a].pl ? i : a), 0), worst = rows.reduce((a, r, i) => (r.pl < rows[a].pl ? i : a), 0);
+  const label = rows.length <= 45;
+  const onMove = (e: PointerEvent) => {
+    const box = (e.currentTarget as SVGElement).getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W;
+    setHover(Math.max(0, Math.min(rows.length - 1, Math.floor((px - L) / slot))));
+  };
+  const h = hover != null ? rows[hover] : null;
+  return (
+    <div class="chart">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Profit and loss per day" onPointerMove={onMove} onPointerDown={(e) => { onMove(e); }} onPointerLeave={() => setHover(null)}
+        onClick={() => hover != null && onPick?.(rows[hover].date)}>
+        {[-top, 0, top].map((v) => (
+          <g>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} style={{ stroke: v === 0 ? 'var(--axis)' : 'var(--grid)' }} stroke-width="1" />
+            <text x={L - 6} y={y(v) + 4} text-anchor="end" font-size="10" style={{ fill: 'var(--muted)' }}>{v > 0 ? '+' : ''}{fmtCompact(v)}</text>
+          </g>
+        ))}
+        {rows.map((r, i) => (
+          <path d={bar(i, r.pl)} style={{ fill: r.pl >= 0 ? 'var(--good)' : 'var(--bad)', opacity: hover != null && hover !== i ? 0.45 : picked && picked !== r.date ? 0.55 : 1 }} />
+        ))}
+        {label && [best, worst].filter((i, k, a) => a.indexOf(i) === k).map((i) => (
+          <text x={x(i) + bw / 2} y={rows[i].pl >= 0 ? y(rows[i].pl) - 4 : y(rows[i].pl) + 12} text-anchor="middle" font-size="9" style={{ fill: 'var(--ink-2)' }}>{fmtCompact(rows[i].pl)}</text>
+        ))}
+        <text x={L} y={H - 4} font-size="10" style={{ fill: 'var(--muted)' }}>{rows[0].date.slice(5)}</text>
+        <text x={W - R} y={H - 4} font-size="10" text-anchor="end" style={{ fill: 'var(--muted)' }}>{rows.at(-1)!.date.slice(5)}</text>
+      </svg>
+      {h && (
+        <div class="tip" style={{ top: 2, [hover! > rows.length / 2 ? 'left' : 'right']: '6%' }}>
+          <div class="muted">{h.date}</div>
+          <div class="r"><span>{h.pl >= 0 ? '▲' : '▼'} Gain / loss</span><b class={`num ${h.pl >= 0 ? 'up' : 'down'}`}>{signed(h.pl, display)}</b></div>
+          <div class="r"><span>Change</span><span class="num">{h.plPct >= 0 ? '+' : ''}{h.plPct.toFixed(2)}%</span></div>
+          {Math.abs(h.flow) > 0.5 && <div class="r"><span>Added / removed</span><span class="num">{signed(h.flow, display)}</span></div>}
+          <div class="r"><span>Net worth</span><span class="num">{fmt(h.nw, display)}</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Running total of daily gains and losses, from a zero line. */
+export function CumulativeLine({ points, display }: { points: { date: string; value: number }[]; display: Display }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (points.length < 2) return <p class="muted small">Needs at least two days.</p>;
+  const W = 340, H = 130, L = 42, R = 8, T = 10, B = 20;
+  const vals = points.map((p) => p.value);
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = hi - lo || 1;
+  const x = (i: number) => L + (i / (points.length - 1)) * (W - L - R);
+  const y = (v: number) => T + (1 - (v - lo) / span) * (H - T - B);
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ');
+  const onMove = (e: PointerEvent) => {
+    const box = (e.currentTarget as SVGElement).getBoundingClientRect();
+    setHover(Math.max(0, Math.min(points.length - 1, Math.round((((e.clientX - box.left) / box.width) * W - L) / ((W - L - R) / (points.length - 1))))));
+  };
+  const last = points.at(-1)!;
+  const h = hover != null ? points[hover] : null;
+  return (
+    <div class="chart">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Cumulative gain or loss" onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
+        {[lo, 0, hi].filter((v, i, a) => a.indexOf(v) === i).map((v) => (
+          <g>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} style={{ stroke: v === 0 ? 'var(--axis)' : 'var(--grid)' }} stroke-width="1" />
+            <text x={L - 6} y={y(v) + 4} text-anchor="end" font-size="10" style={{ fill: 'var(--muted)' }}>{v > 0 ? '+' : ''}{fmtCompact(v)}</text>
+          </g>
+        ))}
+        <path d={`${line} L${x(points.length - 1)} ${y(0)} L${x(0)} ${y(0)} Z`} style={{ fill: 'var(--accent)' }} opacity="0.1" />
+        <path d={line} fill="none" style={{ stroke: 'var(--accent)' }} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+        <circle cx={x(h ? hover! : points.length - 1)} cy={y((h ?? last).value)} r="4.5" style={{ fill: 'var(--accent)', stroke: 'var(--surface)' }} stroke-width="2" />
+        <text x={L} y={H - 4} font-size="10" style={{ fill: 'var(--muted)' }}>{points[0].date.slice(5)}</text>
+        <text x={W - R} y={H - 4} font-size="10" text-anchor="end" style={{ fill: 'var(--muted)' }}>{last.date.slice(5)}</text>
+      </svg>
+      {h && (
+        <div class="tip" style={{ top: 2, [hover! > points.length / 2 ? 'left' : 'right']: '6%' }}>
+          <div class="muted">{h.date}</div>
+          <div class="r"><span>Total so far</span><b class={`num ${h.value >= 0 ? 'up' : 'down'}`}>{signed(h.value, display)}</b></div>
+        </div>
+      )}
     </div>
   );
 }

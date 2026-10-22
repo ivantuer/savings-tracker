@@ -100,6 +100,7 @@ export function takeSnapshot(s: AppState): Snapshot {
     uah: netWorth(s, 'UAH'),
     usdt: netWorth(s, 'USDT'),
     byCategory: categoryTotals(s, 'USD'),
+    byPosition: Object.fromEntries(s.positions.flatMap((p) => { const v = positionValue(p, s, 'USD'); return v == null ? [] : [[p.id, Math.round(v * 100) / 100]]; })),
   };
 }
 
@@ -220,4 +221,97 @@ export function historyRows(snaps: Snapshot[], to: Display) {
     const byCat = Object.fromEntries(Object.entries(sn.byCategory).map(([c, v]) => [c, (v ?? 0) * k])) as Partial<Record<Category, number>>;
     return { date: sn.date, total, byCat };
   });
+}
+
+// ---- day-by-day analytics ------------------------------------------------------------------------------------------
+
+export interface DayRow {
+  date: string;
+  /** net worth at the end of the day */
+  nw: number;
+  /** market gain or loss that day: the change in net worth minus money added or removed by hand */
+  pl: number;
+  /** pl as a percentage of the previous day's net worth */
+  plPct: number;
+  /** money added (+) or removed (-) by hand that day */
+  flow: number;
+  byCat: Partial<Record<Category, number>>;
+  /** positions by gain/loss that day, biggest move first (empty for days recorded before this was tracked) */
+  movers: { id: string; pl: number }[];
+}
+
+const endOf = (sn: Snapshot) => sn.at ?? `${sn.date}T23:59:59Z`;
+
+/**
+ * One row per day after the first snapshot. Values are in the display currency, scaled by each snapshot's own
+ * rate, so a hryvnia move shows up in the day it happened. Deposits and withdrawals are taken out so they never look like profit.
+ */
+export function dailyRows(s: AppState, to: Display): DayRow[] {
+  const snaps = [...s.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+  const scale = (sn: Snapshot) => (sn.usd > 0 ? snapshotValue(sn, to) / sn.usd : 0);
+  const rows: DayRow[] = [];
+  for (let i = 1; i < snaps.length; i++) {
+    const prev = snaps[i - 1], cur = snaps[i];
+    const kPrev = scale(prev), kCur = scale(cur);
+    const inDay = s.flows.filter((f) => f.at > endOf(prev) && f.at <= endOf(cur));
+    const flow = inDay.reduce((a, f) => a + f.usd * kCur, 0);
+    const nw = snapshotValue(cur, to), before = snapshotValue(prev, to);
+    const pl = nw - before - flow;
+
+    const byCat: Partial<Record<Category, number>> = {};
+    for (const c of ['cash', 'crypto', 'stocks', 'inzhur', 'ovdp'] as Category[]) {
+      const fc = inDay.filter((f) => f.category === c).reduce((a, f) => a + f.usd * kCur, 0);
+      const v = (cur.byCategory[c] ?? 0) * kCur - (prev.byCategory[c] ?? 0) * kPrev - fc;
+      if (Math.abs(v) >= 0.005) byCat[c] = v;
+    }
+
+    const movers: DayRow['movers'] = [];
+    if (cur.byPosition && prev.byPosition) {
+      const ids = new Set([...Object.keys(cur.byPosition), ...Object.keys(prev.byPosition)]);
+      for (const id of ids) {
+        const fp = inDay.filter((f) => f.positionId === id).reduce((a, f) => a + f.usd * kCur, 0);
+        const v = (cur.byPosition[id] ?? 0) * kCur - (prev.byPosition[id] ?? 0) * kPrev - fp;
+        if (Math.abs(v) >= 0.005) movers.push({ id, pl: v });
+      }
+      movers.sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
+    }
+    rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers });
+  }
+  return rows;
+}
+
+export function rowsIn(rows: DayRow[], r: Range): DayRow[] {
+  if (r === 'All') return rows;
+  const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
+  return rows.filter((x) => x.date >= from);
+}
+
+export function dailySummary(rows: DayRow[]) {
+  if (!rows.length) return null;
+  const total = rows.reduce((a, r) => a + r.pl, 0);
+  const startNw = rows[0].nw - rows[0].pl - rows[0].flow;
+  const sorted = [...rows].sort((a, b) => b.pl - a.pl);
+  return {
+    days: rows.length,
+    total,
+    totalPct: startNw > 0 ? (total / startNw) * 100 : 0,
+    avg: total / rows.length,
+    best: sorted[0],
+    worst: sorted[sorted.length - 1],
+    winRate: (rows.filter((r) => r.pl > 0).length / rows.length) * 100,
+    flow: rows.reduce((a, r) => a + r.flow, 0),
+  };
+}
+
+/** Running total of daily gains and losses across the rows. */
+export function cumulativePl(rows: DayRow[]): { date: string; value: number }[] {
+  let acc = 0;
+  return rows.map((r) => ({ date: r.date, value: (acc += r.pl) }));
+}
+
+/** Gain or loss per position summed over the rows, biggest first. */
+export function topMovers(rows: DayRow[]): { id: string; pl: number }[] {
+  const sum = new Map<string, number>();
+  for (const r of rows) for (const m of r.movers) sum.set(m.id, (sum.get(m.id) ?? 0) + m.pl);
+  return [...sum].map(([id, pl]) => ({ id, pl })).sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
 }

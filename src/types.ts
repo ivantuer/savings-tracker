@@ -46,6 +46,17 @@ export interface Snapshot {
   uah: number;
   usdt: number;
   byCategory: Partial<Record<Category, number>>; // USD
+  /** value of each position in USD (rounded to cents), for day-by-day analytics */
+  byPosition?: Record<string, number>;
+}
+
+/** Money moved in or out of a position by hand (a deposit, withdrawal, new or removed position): not a market gain or loss. */
+export interface Flow {
+  id: string;
+  at: string;
+  usd: number;
+  positionId: string;
+  category?: Category;
 }
 
 export interface Rates {
@@ -92,6 +103,7 @@ export interface AppState {
   snapshots: Snapshot[];
   /** ids of deleted wallets and positions, so a deletion survives a sync (id -> when) */
   tombstones: Record<string, string>;
+  flows: Flow[];
   settings: Settings;
   rates: Rates;
   prices: Prices;

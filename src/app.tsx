@@ -4,11 +4,12 @@ import { CATEGORIES, categoryColor, categoryLabel, type Display } from './types'
 import { fmt, netWorth, walletTotal } from './calc';
 import { Dashboard } from './dashboard';
 import { PricesView } from './prices';
+import { DailyView } from './daily';
 import { WalletView } from './wallet';
 import { WalletForm } from './forms';
 import { SettingsView } from './settings';
 
-type Tab = 'overview' | 'wallets' | 'prices' | 'settings';
+type Tab = 'overview' | 'daily' | 'wallets' | 'prices' | 'settings';
 
 export function App() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -71,6 +72,7 @@ export function App() {
         </>
       )}
 
+      {tab === 'daily' && <DailyView />}
       {tab === 'prices' && <PricesView />}
       {tab === 'settings' && <SettingsView />}
 
@@ -79,7 +81,7 @@ export function App() {
       {addingWallet && <WalletForm onClose={() => setAddingWallet(false)} onSaved={(id) => { setAddingWallet(false); setWalletId(id); }} />}
 
       <nav class="tabs">
-        {(['overview', 'wallets', 'prices', 'settings'] as Tab[]).map((t) => (
+        {(['overview', 'daily', 'wallets', 'prices', 'settings'] as Tab[]).map((t) => (
           <button class={tab === t ? 'on' : ''} onClick={() => { setTab(t); if (t !== 'wallets') setWalletId(null); }}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>

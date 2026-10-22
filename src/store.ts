@@ -1,8 +1,8 @@
 import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
-import type { AppState, Position, Wallet } from './types';
+import type { AppState, Flow, Position, Wallet } from './types';
 import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
-import { takeSnapshot } from './calc';
+import { positionValue, takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
 
@@ -12,6 +12,7 @@ const empty = (): AppState => ({
   positions: [],
   snapshots: [],
   tombstones: {},
+  flows: [],
   settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market', theme: 'auto' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
@@ -23,6 +24,31 @@ export const refreshing = signal(false);
 export const refreshError = signal('');
 
 export const uid = () => crypto.randomUUID();
+
+const usdValue = (p: Position) => positionValue(p, state.value, 'USD') ?? 0;
+
+/**
+ * USD moved by hand when `prev` became `next`: the change in quantity valued at the new price. A change in price or
+ * rate is a market gain or loss, not a flow. `next` undefined means the position was removed.
+ */
+function flowFor(prev: Position | undefined, next: Position | undefined): Flow | null {
+  const ref = next ?? prev;
+  if (!ref) return null;
+  let usd: number;
+  if (!next) usd = -usdValue(prev!);
+  else if (!prev) usd = usdValue(next);
+  else {
+    const unit = next.quantity !== 0 ? usdValue(next) / next.quantity : prev.quantity !== 0 ? usdValue(prev) / prev.quantity : 0;
+    usd = (next.quantity - prev.quantity) * unit;
+  }
+  const category = state.value.wallets.find((w) => w.id === ref.walletId)?.category;
+  return Math.abs(usd) < 0.005 ? null : { id: uid(), at: new Date().toISOString(), usd: Math.round(usd * 100) / 100, positionId: ref.id, category };
+}
+
+const addFlows = (fs: (Flow | null)[]) => {
+  const add = fs.filter((x): x is Flow => !!x);
+  if (add.length) state.value = { ...state.value, flows: [...state.value.flows, ...add] };
+};
 
 /** Called after every change to wallets, positions or snapshots; the sync engine plugs in here. */
 export const hooks = { dataChanged: () => {}, resumed: () => {} };
@@ -40,7 +66,7 @@ export async function init() {
   void refresh();
 }
 
-export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones'] }) {
+export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[] }) {
   state.value = { ...state.value, ...d };
 }
 
@@ -100,6 +126,7 @@ export const upsertWallet = (w: Wallet) => {
 };
 export const deleteWallet = (id: string) => {
   const at = new Date().toISOString();
+  addFlows(state.value.positions.filter((p) => p.walletId === id).map((p) => flowFor(p, undefined)));
   update((s) => ({
     ...s,
     wallets: s.wallets.filter((w) => w.id !== id),
@@ -119,12 +146,14 @@ export function upsertPosition(p: Position) {
       p = { ...p, history: [...(prev?.history ?? p.history ?? []), { date: new Date().toISOString(), value }] };
     } else p = { ...p, history: prev?.history };
   }
+  addFlows([flowFor(prev, p)]);
   update((s) => ({ ...s, positions: s.positions.some((x) => x.id === p.id) ? s.positions.map((x) => (x.id === p.id ? p : x)) : [...s.positions, p] }));
   if (p.type === 'crypto' || p.type === 'stock') void fetchPrices(state.value).then((prices) => update((s) => ({ ...s, prices })));
   saveSnapshot();
   hooks.dataChanged();
 }
 export const deletePosition = (id: string) => {
+  addFlows([flowFor(state.value.positions.find((p) => p.id === id), undefined)]);
   update((s) => ({ ...s, positions: s.positions.filter((p) => p.id !== id), tombstones: { ...s.tombstones, [id]: new Date().toISOString() } }));
   saveSnapshot();
   hooks.dataChanged();

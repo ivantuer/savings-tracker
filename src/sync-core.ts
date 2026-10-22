@@ -1,11 +1,12 @@
 // Encrypted sync with the Savings Tracker Worker. Pure functions (no DOM, no UI state) so they can be tested in Node.
-import type { Position, Snapshot, Wallet } from './types';
+import type { Flow, Position, Snapshot, Wallet } from './types';
 
 export interface SyncData {
   wallets: Wallet[];
   positions: Position[];
   snapshots: Snapshot[];
   tombstones: Record<string, string>;
+  flows: Flow[];
 }
 
 /** The data key (`key`), encrypted under the passkey-derived key, so another device with the same passkey can open the vault. */
@@ -61,7 +62,7 @@ export async function decrypt(v: Vault, iv: string, blob: string): Promise<SyncD
   try {
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await aes(v.key), unb64(blob));
     const d = JSON.parse(td.decode(pt)) as Partial<SyncData>;
-    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {} };
+    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {}, flows: d.flows ?? [] };
   } catch {
     throw new Error('Could not decrypt the synced data');
   }
@@ -98,7 +99,8 @@ export function mergeData(a: SyncData, b: SyncData): SyncData {
   const ids = new Set(wallets.map((w) => w.id));
   const positions = byKey(a.positions, b.positions, (p) => p.id).filter(alive).filter((p) => ids.has(p.walletId));
   const snapshots = byKey(a.snapshots, b.snapshots, (s) => s.date).sort((x, y) => x.date.localeCompare(y.date));
-  return { wallets, positions, snapshots, tombstones };
+  const flows = byKey(a.flows ?? [], b.flows ?? [], (x) => x.id).sort((x, y) => x.at.localeCompare(y.at));
+  return { wallets, positions, snapshots, tombstones, flows };
 }
 
 /** Stable form for comparing two datasets regardless of ordering. */
@@ -109,6 +111,7 @@ export function canon(d: SyncData): string {
     p: sortBy(d.positions, (x) => x.id),
     s: sortBy(d.snapshots, (x) => x.date),
     t: Object.entries(d.tombstones).sort(),
+    f: sortBy(d.flows ?? [], (x) => x.id),
   });
 }
 
