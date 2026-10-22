@@ -94,6 +94,8 @@ export interface Prices {
   stocks: Record<string, number>; // ticker -> USD
   /** Inzhur fund key (REIT, MILTECH, ENERGY) -> UAH per certificate */
   inzhur?: Record<string, number>;
+  /** the purchase price of one certificate, for reference; funds are valued at the redemption price above */
+  inzhurBuy?: Record<string, number>;
   /** ОВДП by ISIN, from Inzhur's public catalog (UAH per bond) */
   bonds?: Record<string, BondQuote>;
   fetchedAt?: string;

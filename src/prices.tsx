@@ -62,11 +62,12 @@ export function PricesView() {
       {funds.length > 0 && (
         <div class="card">
           <h2>Inzhur funds</h2>
-          <div class="muted small" style="margin:-6px 0 6px">inzhur.reit, UAH per certificate</div>
+          <div class="muted small" style="margin:-6px 0 6px">inzhur.reit, UAH per certificate. Valued at the redemption price (what a sale pays), as in the Inzhur app.</div>
           <table class="prices"><tbody>
             {funds.map((p) => {
               const price = s.prices.inzhur?.[p.symbol!.toUpperCase()];
-              return <tr><td>{p.name}<div class="muted small">{fmtQty(p.quantity)} certificates</div></td><td class={`num ${price == null ? 'neg' : ''}`}>{price == null ? 'manual' : `₴${price.toLocaleString('en-US', { maximumFractionDigits: 4 })}`}</td></tr>;
+              const buy = s.prices.inzhurBuy?.[p.symbol!.toUpperCase()];
+              return <tr><td>{p.name}<div class="muted small">{fmtQty(p.quantity)} certificates{buy != null && price != null ? ` · buy price ₴${buy.toLocaleString('en-US', { maximumFractionDigits: 4 })}` : ''}</div></td><td class={`num ${price == null ? 'neg' : ''}`}>{price == null ? 'manual' : `₴${price.toLocaleString('en-US', { maximumFractionDigits: 4 })}`}</td></tr>;
             })}
           </tbody></table>
         </div>

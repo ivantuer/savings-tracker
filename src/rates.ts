@@ -54,26 +54,47 @@ export const INZHUR_FUNDS = [
   { key: 'ENERGY', match: 'inzhur energy' },
 ] as const;
 
+/** What Inzhur's app does when a fund is sold: the redemption price is a little below the buy price. Used if it cannot be read. */
+const FUND_SPREAD: Record<string, number> = { REIT: 0.0025, MILTECH: 0.005, ENERGY: 0.0025 };
+
+export interface FundQuote { buy: number; sell?: number }
+
 /**
- * Reads the "current purchase price of 1 certificate" for each fund from the public inzhur.reit page
- * (the site allows cross-origin reads). Each price is attached to the fund name that precedes it.
+ * Reads each fund's price from the public inzhur.reit page: the purchase price of one certificate (shown next to the
+ * fund's name) and, from the page's price list, its redemption price. The two lists are paired by their exact buy price.
  */
-export function parseInzhurPrices(html: string): Record<string, number> {
+export function parseInzhurFunds(html: string): Record<string, FundQuote> {
   const text = html.replace(/&quot;/g, '"');
   const names = [...text.matchAll(/"name":\[0,"(Inzhur [^"]+)"\]/g)].map((m) => ({ at: m.index!, name: m[1].toLowerCase() }));
-  const out: Record<string, number> = {};
+  const out: Record<string, FundQuote> = {};
   for (const m of text.matchAll(/"value":\[0,"([\d.]+)"\],"dynamicValue":\[0,"initialInvestment"/g)) {
     const owner = names.filter((n) => n.at < m.index!).at(-1);
     const fund = INZHUR_FUNDS.find((f) => owner?.name === f.match);
-    if (fund && !(fund.key in out)) out[fund.key] = Number(m[1]);
+    if (fund && !(fund.key in out)) out[fund.key] = { buy: Number(m[1]) };
+  }
+  const script = html.match(/<script[^>]*type="application\/json\+devalue"[^>]*>([\s\S]*?)<\/script>/);
+  if (script) {
+    try {
+      const data = parseDevalue(script[1]);
+      const store = data instanceof Map ? [...data.entries()].find(([k]) => String(k).includes('assets'))?.[1] : null;
+      if (Array.isArray(store)) {
+        const list: { buy: number; sell: number }[] = [];
+        for (const a of store as any[]) {
+          const p = a?.type === 'fund' ? a.details?.prices : null;
+          const buy = Number(p?.buyUAH ?? p?.buy), sell = Number(p?.sellUAH ?? p?.sell);
+          if (buy > 0 && sell > 0) list.push({ buy, sell });
+        }
+        for (const q of Object.values(out)) q.sell = list.find((x) => Math.abs(x.buy - q.buy) / q.buy < 1e-9)?.sell;
+      }
+    } catch { /* keep the buy price and the default spread */ }
   }
   return out;
 }
 
-async function fetchInzhur(): Promise<Record<string, number>> {
+async function fetchInzhur(): Promise<Record<string, FundQuote>> {
   const res = await fetch('https://www.inzhur.reit/');
   if (!res.ok) throw new Error(`inzhur ${res.status}`);
-  return parseInzhurPrices(await res.text());
+  return parseInzhurFunds(await res.text());
 }
 
 /**
@@ -196,7 +217,13 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
     }
   }
   if (s.positions.some((p) => p.type === 'manual' && p.symbol)) {
-    tasks.push(fetchInzhur().then((r) => { Object.assign(next.inzhur!, r); }, (e) => fail('Inzhur funds', e)));
+    tasks.push(fetchInzhur().then((r) => {
+      next.inzhurBuy = {};
+      for (const [key, q] of Object.entries(r)) {
+        next.inzhur![key] = q.sell ?? q.buy * (1 - (FUND_SPREAD[key] ?? 0));   // value at what a sale would pay, like Inzhur's own app
+        next.inzhurBuy[key] = q.buy;
+      }
+    }, (e) => fail('Inzhur funds', e)));
   }
   if (s.positions.some((p) => p.type === 'bond' && p.bond?.isin)) {
     tasks.push(fetchBondQuotes().then((r) => { Object.assign(next.bonds!, r); }, (e) => fail('ОВДП prices', e)));
