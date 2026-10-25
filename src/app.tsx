@@ -1,3 +1,4 @@
+import type * as preact from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { state, ready, refreshing, refresh, setDisplay, setSettings } from './store';
 import { CATEGORIES, categoryColor, categoryLabel, type Display } from './types';
@@ -9,6 +10,14 @@ import { TradesView } from './trades';
 import { WalletView } from './wallet';
 import { WalletForm } from './forms';
 import { SettingsView } from './settings';
+
+const ICON: Record<'overview' | 'daily' | 'wallets' | 'prices' | 'settings', preact.JSX.Element> = {
+  overview: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></>,
+  daily: <path d="M5 20V12M12 20V5M19 20v-5" />,
+  wallets: <><rect x="3" y="6" width="18" height="13" rx="3" /><path d="M16 12.5h2M3 10h18" /></>,
+  prices: <><path d="M3 17l6-6 4 4 8-8" /><path d="M15 7h6v6" /></>,
+  settings: <><path d="M4 8h10M18 8h2M4 16h2M10 16h10" /><circle cx="16" cy="8" r="2" /><circle cx="8" cy="16" r="2" /></>,
+};
 
 type Tab = 'overview' | 'daily' | 'wallets' | 'prices' | 'settings';
 const LABEL: Record<Tab, string> = { overview: 'Overview', daily: 'Activity', wallets: 'Wallets', prices: 'Prices', settings: 'Settings' };
@@ -33,6 +42,7 @@ export function App() {
 
   return (
     <div class={`shell ${blur}`}>
+      <div class="aurora" aria-hidden="true"><i /><i /><i /></div>
       <div class="scroll" ref={scroller}>
       <div class="topbar">
         <div class="seg">
@@ -97,7 +107,8 @@ export function App() {
 
       <nav class="tabs">
         {(['overview', 'daily', 'wallets', 'prices', 'settings'] as Tab[]).map((t) => (
-          <button class={tab === t ? 'on' : ''} onClick={() => { setTab(t); if (t !== 'wallets') setWalletId(null); }}>
+          <button class={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => { setTab(t); if (t !== 'wallets') setWalletId(null); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{ICON[t]}</svg>
             {LABEL[t]}
           </button>
         ))}

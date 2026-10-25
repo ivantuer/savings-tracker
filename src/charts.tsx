@@ -4,43 +4,43 @@ import { fmt, fmtCompact, historyRows, type ViewRow } from './calc';
 
 const sorted = (totals: Record<Category, number>) => CATEGORIES.map((c) => ({ ...c, value: totals[c.id] })).filter((c) => c.value > 0);
 
+/** A full ring stands for this share of the total, so the biggest categories fit as concentric rings. */
+const RING_FULL = 0.5;
+
 export function Donut({ totals, display, total }: { totals: Record<Category, number>; display: Display; total: number }) {
   const [hover, setHover] = useState<Category | null>(null);
-  const entries = sorted(totals);
+  const entries = sorted(totals).sort((a, b) => b.value - a.value);
   const sum = entries.reduce((a, c) => a + c.value, 0) || 1;
-  const R = 58, C = 2 * Math.PI * R;
-  let offset = 0;
+  const gap = 11, outer = 66;
   const active = entries.find((e) => e.id === hover);
   return (
     <div class="donut">
       <div class="donut-wrap">
-        <svg viewBox="0 0 150 150" width="150" height="150" role="img" aria-label="Allocation by category">
-          {entries.map((c) => {
-            const len = (c.value / sum) * C;
-            const el = (
-              <circle cx="75" cy="75" r={R} fill="none" stroke-width={hover === c.id ? 22 : 18}
-                style={{ stroke: c.color, opacity: hover && hover !== c.id ? 0.35 : 1, transition: 'opacity .15s' }}
-                stroke-dasharray={`${Math.max(len - 2, 0)} ${C}`} stroke-dashoffset={-offset} transform="rotate(-90 75 75)"
-                onMouseEnter={() => setHover(c.id)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === c.id ? null : c.id)} />
-            );
-            offset += len;
-            return el;
-          })}
+        <svg viewBox="0 0 150 150" width="150" height="150" role="img" aria-label={`Allocation rings: ${entries.map((c) => `${c.label} ${Math.round((c.value / sum) * 100)} percent`).join(', ')}. A full ring is ${RING_FULL * 100} percent.`}>
+          <g transform="rotate(-90 75 75)" fill="none" stroke-width="8" stroke-linecap="round">
+            {entries.map((c, i) => {
+              const r = outer - i * gap, C = 2 * Math.PI * r;
+              const len = Math.min(1, c.value / sum / RING_FULL) * C;
+              return (
+                <g onMouseEnter={() => setHover(c.id)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === c.id ? null : c.id)} style={{ cursor: 'pointer', opacity: hover && hover !== c.id ? 0.35 : 1, transition: 'opacity .15s' }}>
+                  <circle cx="75" cy="75" r={r} style={{ stroke: 'var(--grid)' }} />
+                  <circle cx="75" cy="75" r={r} stroke-dasharray={`${Math.max(len, 0.01)} ${C}`} style={{ stroke: c.color, filter: `drop-shadow(0 0 4px ${c.color})` }} />
+                </g>
+              );
+            })}
+          </g>
         </svg>
-        <div class="donut-center">
-          <b class="num">{active ? `${Math.round((active.value / sum) * 100)}%` : fmtCompact(total)}</b>
-          <span>{active ? active.label : display}</span>
-        </div>
       </div>
       <ul class="legend">
         {entries.map((c) => (
           <li class={hover === c.id ? 'on' : ''} onMouseEnter={() => setHover(c.id)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === c.id ? null : c.id)}>
-            <span class="swatch" style={{ background: c.color }} />
+            <span class="swatch" style={{ background: c.color, borderRadius: '50%' }} />
             <span>{c.label}</span>
             <b class="num">{Math.round((c.value / sum) * 100)}%</b>
             <small class="num">{fmt(c.value, display)}</small>
           </li>
         ))}
+        <li style="cursor:default;padding-top:0"><small style="grid-column:1/4;margin:0;font-size:11px">Full ring = {RING_FULL * 100}% of net worth</small></li>
       </ul>
     </div>
   );
@@ -85,13 +85,13 @@ export function StackedArea({ rows, display }: { rows: ReturnType<typeof history
             <text x={L - 6} y={y(v) + 4} text-anchor="end" font-size="10" style={{ fill: 'var(--muted)' }}>{fmtCompact(v)}</text>
           </g>
         ))}
-        {bands.map(({ c, d }) => <path d={d} style={{ fill: categoryColor(c), stroke: 'var(--surface)' }} stroke-width="2" stroke-linejoin="round" />)}
+        {bands.map(({ c, d }) => <path d={d} style={{ fill: categoryColor(c), stroke: 'var(--knock)' }} stroke-width="2" stroke-linejoin="round" />)}
         <text x={L} y={H - 4} font-size="10" style={{ fill: 'var(--muted)' }}>{rows[0].date.slice(5)}</text>
         <text x={W - R} y={H - 4} font-size="10" text-anchor="end" style={{ fill: 'var(--muted)' }}>{rows.at(-1)!.date.slice(5)}</text>
         {h && (
           <g>
             <line x1={hx} x2={hx} y1={T} y2={H - B} style={{ stroke: 'var(--ink-2)' }} stroke-width="1" />
-            <circle cx={hx} cy={y(h.total)} r="4.5" style={{ fill: 'var(--ink)', stroke: 'var(--surface)' }} stroke-width="2" />
+            <circle cx={hx} cy={y(h.total)} r="4.5" style={{ fill: 'var(--ink)', stroke: 'var(--knock)' }} stroke-width="2" />
           </g>
         )}
       </svg>
@@ -251,7 +251,7 @@ export function CumulativeLine({ points, display }: { points: { date: string; va
         ))}
         <path d={`${line} L${x(points.length - 1)} ${y(0)} L${x(0)} ${y(0)} Z`} style={{ fill: 'var(--accent)' }} opacity="0.1" />
         <path d={line} fill="none" style={{ stroke: 'var(--accent)' }} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-        <circle cx={x(h ? hover! : points.length - 1)} cy={y((h ?? last).value)} r="4.5" style={{ fill: 'var(--accent)', stroke: 'var(--surface)' }} stroke-width="2" />
+        <circle cx={x(h ? hover! : points.length - 1)} cy={y((h ?? last).value)} r="4.5" style={{ fill: 'var(--accent)', stroke: 'var(--knock)' }} stroke-width="2" />
         <text x={L} y={H - 4} font-size="10" style={{ fill: 'var(--muted)' }}>{points[0].date.slice(5)}</text>
         <text x={W - R} y={H - 4} font-size="10" text-anchor="end" style={{ fill: 'var(--muted)' }}>{last.date.slice(5)}</text>
       </svg>

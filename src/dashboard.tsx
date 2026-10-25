@@ -41,10 +41,11 @@ export function Dashboard({ goWallet }: { goWallet: (id: string) => void }) {
           <span class="muted small">Net worth</span>
           <div class="seg small">{RANGES.map((x) => <button class={range === x ? 'on' : ''} onClick={() => setRange(x)}>{x}</button>)}</div>
         </div>
-        <div class="hero num">{fmt(total, d)}</div>
+        <Hero text={fmt(total, d)} />
         {ch ? (
-          <div class={`delta num ${ch.delta >= 0 ? 'up' : 'down'}`}>
-            {ch.delta >= 0 ? '▲' : '▼'} {fmt(Math.abs(ch.delta), d)} ({ch.pct >= 0 ? '+' : ''}{ch.pct.toFixed(1)}%) <span class="muted" style="font-weight:400">since {ch.since}{Math.abs(ch.flow) > 0.5 && ` · excludes ${fmt(Math.abs(ch.flow), d)} ${ch.flow > 0 ? 'added' : 'removed'} by you`}</span>
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span class={`delta num ${ch.delta >= 0 ? 'up' : 'down'}`}>{ch.delta >= 0 ? '▲ +' : '▼ −'}{Math.abs(ch.pct).toFixed(1)}%</span>
+            <span class="small num">{ch.delta >= 0 ? '+' : '−'}{fmt(Math.abs(ch.delta), d)} <span class="muted">since {ch.since}{Math.abs(ch.flow) > 0.5 && ` · excludes ${fmt(Math.abs(ch.flow), d)} ${ch.flow > 0 ? 'added' : 'removed'} by you`}</span></span>
           </div>
         ) : (
           <div class="muted small">Change appears after the next daily snapshot</div>
@@ -208,4 +209,10 @@ function RealReturnCard({ range }: { range: Range }) {
       )}
     </div>
   );
+}
+
+/** The net worth with its decimals set small, so the whole number leads. */
+function Hero({ text }: { text: string }) {
+  const i = text.indexOf('.');
+  return <div class="hero num">{i < 0 ? text : <>{text.slice(0, i)}<span class="cents">{text.slice(i)}</span></>}</div>;
 }

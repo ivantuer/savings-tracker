@@ -13,8 +13,8 @@ export default defineConfig({
         name: 'Savings Tracker',
         short_name: 'Savings',
         description: 'Savings and investments tracker',
-        theme_color: '#0f1720',
-        background_color: '#0f1720',
+        theme_color: '#120f2b',
+        background_color: '#120f2b',
         display: 'standalone',
         orientation: 'portrait',
         start_url: './',
@@ -23,7 +23,10 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
-      workbox: { navigateFallback: 'index.html' },
+      workbox: {
+        navigateFallback: 'index.html',
+        runtimeCaching: [{ urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\//, handler: 'CacheFirst', options: { cacheName: 'fonts', expiration: { maxEntries: 20, maxAgeSeconds: 31_536_000 } } }],
+      },
     }),
   ],
 });
