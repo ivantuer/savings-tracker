@@ -39,6 +39,10 @@ export function unitPriceOf(p: Position, s: AppState): number | undefined {
   return live ?? p.unitPrice;
 }
 
+/** The spread (%) that turns the catalog/manual price into the price a bank actually paid on some day. */
+export const spreadFromPrice = (base: number, bankPrice: number): number | undefined =>
+  base > 0 && bankPrice > 0 && bankPrice <= base ? Math.round((1 - bankPrice / base) * 100_000) / 1000 : undefined;
+
 /**
  * Value of one bond: the live sell price from the Inzhur catalog (by ISIN), else the manual value, else face, less the
  * spread your broker takes when you sell.
@@ -48,6 +52,9 @@ export function bondUnitValue(p: Position, s: AppState): number | undefined {
   const base = live ?? p.bond?.unitValue ?? p.bond?.face;
   return base == null ? undefined : base * (1 - Math.min(Math.max(p.bond?.spreadPct ?? 0, 0), 100) / 100);
 }
+
+/** The currency a position's amounts and cost are kept in: USD for crypto and stocks, else its own. */
+export const nativeCur = (p: Position): Fiat => (p.type === 'crypto' || p.type === 'stock' ? 'USD' : (p.currency ?? 'UAH'));
 
 /** Value of a position in its native currency, or null when no price is available. */
 export function nativeValue(p: Position, s: AppState): { amount: number; cur: Cur } | null {
@@ -347,6 +354,49 @@ export function dailyRows(s: AppState, to: Display): DayRow[] {
     rows.push({ date: cur.date, nw, pl, plPct: before > 0 ? (pl / before) * 100 : 0, flow, byCat, movers, posPl, posNw, posBefore, posFlow, income, posIncome });
   }
   return rows;
+}
+
+// ---- real return -----------------------------------------------------------------------------------------------------
+
+/** Chain daily percentage gains into one return over the period (time-weighted, so deposits do not count as profit). */
+export const chainReturn = (rows: Pick<DayRow, 'plPct'>[]) => rows.reduce((acc, r) => acc * (1 + r.plPct / 100), 1) - 1;
+
+export interface RealReturn {
+  days: number;
+  since: string;
+  /** your return measured in hryvnia and in dollars, as fractions (0.05 = 5%) */
+  uah: number;
+  usd: number;
+  /** how much the dollar gained against the hryvnia over the period: what plain dollars would have earned in hryvnia */
+  fx: number;
+  /** expected hryvnia inflation over the period, when set in Settings */
+  inflation?: number;
+  /** your hryvnia return after inflation */
+  realUah?: number;
+  /** yearly equivalents, only once the period is long enough to mean something */
+  annualUah?: number;
+  annualUsd?: number;
+}
+
+/**
+ * How your savings did against the alternatives: keeping the money in dollars (it grows by the hryvnia's fall) and
+ * hryvnia inflation. Built from the daily snapshots, with money you added or removed taken out.
+ */
+export function realReturn(s: AppState, r: Range): RealReturn | null {
+  const uahRows = rowsIn(dailyRows(s, 'UAH'), r);
+  const usdRows = rowsIn(dailyRows(s, 'USD'), r);
+  if (!uahRows.length) return null;
+  const snaps = [...adjustedSnapshots(s)].sort((a, b) => a.date.localeCompare(b.date));
+  const first = snaps.findIndex((x) => x.date === uahRows[0].date);
+  const start = snaps[first - 1], end = snaps.at(-1)!;
+  if (!start || !(start.usd > 0) || !(end.usd > 0)) return null;
+  const fx = end.uah / end.usd / (start.uah / start.usd) - 1;
+  const uah = chainReturn(uahRows), usd = chainReturn(usdRows);
+  const days = Math.max(1, Math.round((new Date(`${end.date}T12:00:00`).getTime() - new Date(`${start.date}T12:00:00`).getTime()) / 86_400_000));
+  const yearly = s.settings.inflationPct;
+  const inflation = yearly != null && yearly > 0 ? Math.pow(1 + yearly / 100, days / 365) - 1 : undefined;
+  const annual = (x: number) => (days >= 30 ? Math.pow(1 + x, 365 / days) - 1 : undefined);
+  return { days, since: start.date, uah, usd, fx, inflation, realUah: inflation != null ? (1 + uah) / (1 + inflation) - 1 : undefined, annualUah: annual(uah), annualUsd: annual(usd) };
 }
 
 export interface Part { key: string; label: string; pl: number }

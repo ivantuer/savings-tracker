@@ -71,6 +71,33 @@ export interface Flow {
   category?: Category;
 }
 
+export type TxnKind = 'buy' | 'sell' | 'dividend';
+
+/**
+ * One purchase, sale or dividend of a position. The ledger is a record of these: it never changes a balance by itself,
+ * it only feeds cost, realized profit and return figures.
+ */
+export interface Txn {
+  id: string;
+  at: string;
+  positionId: string;
+  /** the position's name when this was recorded, so it still reads right after the position is removed */
+  label: string;
+  kind: TxnKind;
+  /** units bought or sold (for a dividend: units received, if any) */
+  quantity: number;
+  /** total money in `cur`: paid for a buy, received for a sale or dividend; fees are separate */
+  amount: number;
+  cur: Fiat;
+  fee?: number;
+  /** what the cash movement was worth in USD when it happened: paid incl. fee for a buy, received net of fee for a sale */
+  usd: number;
+  /** the amount was estimated from the price at the time of the edit rather than typed in */
+  est?: boolean;
+  note?: string;
+  updatedAt: string;
+}
+
 export interface Rates {
   /** UAH per 1 USD (NBU) */
   usdUah: number;
@@ -108,6 +135,8 @@ export interface Settings {
   /** which UAH/USD rate converts hryvnia: NBU official, or market (Binance USDT/UAH) */
   uahRate: 'nbu' | 'market';
   theme: 'auto' | 'light' | 'dark';
+  /** expected yearly hryvnia inflation, % (typed by you); used to show returns after inflation */
+  inflationPct?: number;
 }
 
 export interface AppState {
@@ -119,6 +148,8 @@ export interface AppState {
   tombstones: Record<string, string>;
   flows: Flow[];
   income: Income[];
+  /** the trade ledger */
+  txns: Txn[];
   settings: Settings;
   rates: Rates;
   prices: Prices;

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { b64, canon, decrypt, encrypt, KEEP_POSITION_DAYS, mergeData, newVault, snapKey, type SyncData } from '../src/sync-core';
-import type { Position, Snapshot, Wallet } from '../src/types';
+import type { Position, Snapshot, Txn, Wallet } from '../src/types';
 
-const empty = (): SyncData => ({ wallets: [], positions: [], snapshots: [], tombstones: {}, flows: [], income: [] });
+const empty = (): SyncData => ({ wallets: [], positions: [], snapshots: [], tombstones: {}, flows: [], income: [], txns: [] });
 const wallet = (id: string, updatedAt = '2026-01-01T00:00:00Z'): Wallet => ({ id, name: id, category: 'cash', updatedAt });
 const pos = (id: string, walletId: string, updatedAt = '2026-01-01T00:00:00Z', quantity = 1): Position => ({ id, walletId, type: 'fiat', name: id, quantity, updatedAt });
 const snap = (date: string, extra: Partial<Snapshot> = {}): Snapshot => ({ date, usd: 1, uah: 40, usdt: 1, byCategory: {}, ...extra });
@@ -87,5 +87,38 @@ describe('mergeData', () => {
     expect(m.snapshots[0].byPosition).toBeUndefined();
     expect(m.snapshots[1].byPosition).toEqual(by);
     expect(canon(mergeData(m, x, NOW))).toBe(canon(m));
+  });
+});
+
+describe('trade ledger sync', () => {
+  const tx = (id: string, updatedAt = '2026-01-01T00:00:00Z', amount = 10): Txn =>
+    ({ id, at: '2026-01-01T00:00:00Z', positionId: 'p', label: 'P', kind: 'buy', quantity: 1, amount, cur: 'USD', usd: amount, updatedAt });
+
+  it('reads a vault saved before the ledger existed as having no trades', async () => {
+    const v = newVault('https://example.com');
+    const { iv, blob } = await encrypt(v, { wallets: [], positions: [], snapshots: [], tombstones: {}, flows: [], income: [] } as unknown as SyncData);
+    expect((await decrypt(v, iv, blob)).txns).toEqual([]);
+  });
+
+  it('keeps trades from both devices, newest edit wins, and converges', () => {
+    const a: SyncData = { ...empty(), txns: [tx('t1', '2026-02-01T00:00:00Z', 20), tx('t2')] };
+    const b: SyncData = { ...empty(), txns: [tx('t1', '2026-03-01T00:00:00Z', 30), tx('t3')] };
+    const m = mergeData(a, b, NOW);
+    expect(m.txns.map((x) => x.id).sort()).toEqual(['t1', 't2', 't3']);
+    expect(m.txns.find((x) => x.id === 't1')!.amount).toBe(30);
+    expect(canon(mergeData(b, a, NOW))).toBe(canon(m));
+    expect(canon(mergeData(m, m, NOW))).toBe(canon(m));
+  });
+
+  it('applies a deletion, and tolerates data without a ledger', () => {
+    const a: SyncData = { ...empty(), txns: [tx('t1'), tx('t2')] };
+    const gone: SyncData = { ...empty(), tombstones: { t1: '2026-06-01T00:00:00Z' } };
+    expect(mergeData(a, gone, NOW).txns.map((x) => x.id)).toEqual(['t2']);
+    const old = { wallets: [], positions: [], snapshots: [], tombstones: {}, flows: [], income: [] } as unknown as SyncData;
+    expect(mergeData(a, old, NOW).txns).toHaveLength(2);
+  });
+
+  it('counts trades in the comparison form, so a change is noticed', () => {
+    expect(canon({ ...empty(), txns: [tx('t1')] })).not.toBe(canon(empty()));
   });
 });

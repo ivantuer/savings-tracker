@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { state, refreshError } from './store';
 import { CATEGORIES, categoryColor, type Display } from './types';
-import { RANGES, monoMid, categoryTotals, convert, creditRows, daysAgo, exposure, fmt, fmtCompact, historyRows, holdings, netWorth, periodChange, pnlSummary, ratesOf, snapshotsIn, walletTotal, type Range } from './calc';
+import { RANGES, monoMid, realReturn, categoryTotals, convert, creditRows, daysAgo, exposure, fmt, fmtCompact, historyRows, holdings, netWorth, periodChange, pnlSummary, ratesOf, snapshotsIn, walletTotal, type Range } from './calc';
 import { Bars, Donut, StackBar, StackedArea } from './charts';
 import { downloadSellReminder } from './ics';
 
@@ -70,6 +70,8 @@ export function Dashboard({ goWallet }: { goWallet: (id: string) => void }) {
           {CATEGORIES.filter((c) => totals[c.id] > 0).map((c) => <span class="row small" style="gap:6px"><i class="swatch" style={{ background: c.color }} /><span class="muted">{c.label}</span></span>)}
         </div>
       </div>
+
+      <RealReturnCard range={range} />
 
       <div class="card"><h2>Top holdings</h2><Bars bars={topBars} display={d} share={total} /></div>
 
@@ -162,6 +164,48 @@ function CreditCard({ goWallet }: { goWallet: (id: string) => void }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+const pct = (x: number, digits = 1) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(digits)}%`;
+const tone = (x: number) => (x >= 0 ? 'up' : 'down');
+
+function RealReturnCard({ range }: { range: Range }) {
+  const s = state.value;
+  const rr = realReturn(s, range);
+  const [help, setHelp] = useState(false);
+  return (
+    <div class="card">
+      <div class="row between" style="margin-bottom:6px">
+        <h2 style="margin:0">Real return</h2>
+        <button class="link small" onClick={() => setHelp(!help)}>{help ? 'Hide' : 'How it works'}</button>
+      </div>
+      {help && (
+        <p class="muted small" style="margin-top:0">
+          Your gain over the period, with money you added or removed left out, set against what you would have got by simply keeping dollars (they gain whenever the hryvnia weakens) and against inflation. If your hryvnia return is below the dollar's gain, you did worse than holding dollars. Set the expected inflation in Settings to see the after-inflation line.
+        </p>
+      )}
+      {!rr ? (
+        <p class="muted small" style="margin:0">Needs at least two daily snapshots in this range. Open the app on another day, or pick a longer range.</p>
+      ) : (
+        <>
+          <div class="muted small" style="margin-bottom:6px">{range === 'All' ? 'Since the first snapshot' : `Last ${range}`} · {rr.days} {rr.days === 1 ? 'day' : 'days'} since {rr.since}</div>
+          <div class="item" style="cursor:default"><div class="l"><div>Your return in hryvnia</div>{rr.annualUah != null && <div class="muted small">≈ {pct(rr.annualUah)} a year</div>}</div><div class={`r num ${tone(rr.uah)}`}><b>{pct(rr.uah, 2)}</b></div></div>
+          <div class="item" style="cursor:default"><div class="l"><div>Plain dollars would have made</div><div class="muted small">hryvnia {rr.fx >= 0 ? 'weakened' : 'strengthened'} against the dollar</div></div><div class={`r num ${tone(rr.fx)}`}>{pct(rr.fx, 2)}</div></div>
+          <div class="item" style="cursor:default"><div class="l"><div>Your return in dollars</div>{rr.annualUsd != null && <div class="muted small">≈ {pct(rr.annualUsd)} a year</div>}</div><div class={`r num ${tone(rr.usd)}`}><b>{pct(rr.usd, 2)}</b></div></div>
+          {rr.inflation != null && (
+            <div class="item" style="cursor:default"><div class="l"><div>Hryvnia return after inflation</div><div class="muted small">inflation {pct(rr.inflation, 2)} at {s.settings.inflationPct}% a year</div></div><div class={`r num ${tone(rr.realUah!)}`}><b>{pct(rr.realUah!, 2)}</b></div></div>
+          )}
+          <p class="small" style="margin:10px 0 0">
+            {rr.usd >= 0.0005
+              ? <>You beat plain dollars by <b class="up">{pct(rr.usd, 2)}</b>: your savings grew even measured in dollars.</>
+              : rr.usd <= -0.0005
+                ? <>You trailed plain dollars by <b class="down">{pct(Math.abs(rr.usd), 2).replace('+', '')}</b>: holding dollars would have done better.</>
+                : <>You roughly matched plain dollars.</>}
+          </p>
+        </>
+      )}
     </div>
   );
 }

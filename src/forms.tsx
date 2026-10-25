@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
-import { deleteWallet, deletePosition, recordDividend, state, uid, upsertPosition, upsertWallet } from './store';
-import { addDays, localDate } from './calc';
+import { deleteWallet, deletePosition, recordDividend, state, uid, upsertPosition, upsertWallet, type EditKind } from './store';
+import { addDays, localDate, nativeCur, spreadFromPrice } from './calc';
 import { fetchBondQuotes, INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
@@ -63,8 +63,11 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [lookupMsg, setLookupMsg] = useState('');
   const [coupon, setCoupon] = useState(position?.bond?.couponRate != null ? String(position.bond.couponRate) : '');
   const [maturity, setMaturity] = useState(position?.bond?.maturity ?? '');
+  const [bankPrice, setBankPrice] = useState('');
   const [spread, setSpread] = useState(position?.bond?.spreadPct != null ? String(position.bond.spreadPct) : '');
   const [kind, setKind] = useState<'buy' | 'dividend'>('buy');
+  const [tradeAmount, setTradeAmount] = useState('');
+  const [tradeFee, setTradeFee] = useState('');
   const [sourceId, setSourceId] = useState('');
   const [divAmount, setDivAmount] = useState('');
   const [onCredit, setOnCredit] = useState(!!position?.credit);
@@ -102,6 +105,9 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
     (!onCredit || !!sellBy);
 
   const increased = !!position && quantity != null && !Number.isNaN(quantity) && quantity > position.quantity;
+  const decreased = !!position && quantity != null && !Number.isNaN(quantity) && quantity < position.quantity;
+  // A hand-made change of a trade-able position is logged in the Trades ledger; the amount paid or received is optional.
+  const showTrade = !!position && position.type !== 'fiat' && ((increased && kind === 'buy') || decreased);
   const save = () => {
     if (!valid) return;
     const faceN = num(face) ?? 0;
@@ -122,7 +128,9 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       history: position?.history,
       updatedAt: new Date().toISOString(),
     };
-    upsertPosition(p, increased && kind === 'dividend' ? { dividend: { sourceId: sourceId || undefined } } : undefined);
+    const trade = showTrade ? { amount: num(tradeAmount), fee: num(tradeFee) } : undefined;
+    const editKind: EditKind | undefined = increased && kind === 'dividend' ? { dividend: { sourceId: sourceId || undefined } } : trade ? { trade } : undefined;
+    upsertPosition(p, editKind);
     onClose();
   };
 
@@ -175,6 +183,15 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
           )}
         </>
       )}
+      {showTrade && (
+        <>
+          <label>{decreased ? 'Total received' : 'Total paid'} in {nativeCur(position!)} (optional)</label>
+          <input inputMode="decimal" value={tradeAmount} onInput={(e) => setTradeAmount(e.currentTarget.value)} />
+          <label>Fee in {nativeCur(position!)} (optional)</label>
+          <input inputMode="decimal" value={tradeFee} onInput={(e) => setTradeFee(e.currentTarget.value)} />
+          <p class="muted small" style="margin:6px 0 0">Recorded in Activity → Trades. Left empty, it is estimated from today's price and marked ≈.</p>
+        </>
+      )}
       {type === 'manual' && (
         <>
           <label>Live price from inzhur.reit</label>
@@ -204,7 +221,18 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
           <input inputMode="decimal" value={face} onInput={(e) => setFace(e.currentTarget.value)} />
           <label>{isin ? 'Fallback value' : 'Current value'} per bond (face + accrued; blank = face)</label>
           <input inputMode="decimal" value={unitValue} onInput={(e) => setUnitValue(e.currentTarget.value)} />
-          <label>Sale spread, % (what your broker takes off when you sell)</label>
+          <label>Price your bank pays per bond today (sets the spread)</label>
+          <div class="row">
+            <input inputMode="decimal" value={bankPrice} placeholder="e.g. what Privat24 shows for a sale" onInput={(e) => setBankPrice(e.currentTarget.value)} />
+            <button class="ghost" disabled={!(num(bankPrice)! > 0)} onClick={() => {
+              const base = (isin && state.value.prices.bonds?.[isin.trim().toUpperCase()]?.sell) || num(unitValue) || num(face) || 0;
+              const sp = spreadFromPrice(base, num(bankPrice)!);
+              if (sp == null) return setLookupMsg(`The bank price must be above 0 and not above the catalog price (₴${base}).`);
+              setSpread(String(sp)); setBankPrice('');
+              setLookupMsg(`Spread set to ${sp}% from the catalog price ₴${base}. It keeps applying as that price moves.`);
+            }}>Set</button>
+          </div>
+          <label>Sale spread, % (set above, or enter it)</label>
           <input inputMode="decimal" value={spread} placeholder="0" onInput={(e) => setSpread(e.currentTarget.value)} />
           {(() => {
             const q = num(qty), unit = isin && state.value.prices.bonds?.[isin.trim().toUpperCase()]?.sell || num(unitValue) || num(face) || 0, sp = num(spread) ?? 0;

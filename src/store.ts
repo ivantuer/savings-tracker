@@ -1,9 +1,9 @@
 import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
-import type { AppState, Flow, Income, Position, Wallet } from './types';
+import type { AppState, Flow, Income, Position, Txn, TxnKind, Wallet } from './types';
 import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
 import { snapKey } from './sync-core';
-import { counts, nativeValue, positionValue, takeSnapshot } from './calc';
+import { convert, counts, nativeCur, nativeValue, positionLabel, positionValue, ratesOf, takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
 
@@ -15,6 +15,7 @@ const empty = (): AppState => ({
   tombstones: {},
   flows: [],
   income: [],
+  txns: [],
   settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'market', theme: 'auto' },
   rates: DEFAULT_RATES,
   prices: { crypto: {}, stocks: {} },
@@ -73,7 +74,7 @@ export async function init() {
   void refresh();
 }
 
-export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[]; income: Income[] }) {
+export function applySynced(d: { wallets: Wallet[]; positions: Position[]; snapshots: AppState['snapshots']; tombstones: AppState['tombstones']; flows: Flow[]; income: Income[]; txns: Txn[] }) {
   state.value = { ...state.value, ...d };
 }
 
@@ -147,7 +148,7 @@ export const deleteWallet = (id: string) => {
 };
 
 /** How a change by hand should be counted. A dividend raises the balance without being money you put in. */
-export interface EditKind { dividend?: { sourceId?: string; usd?: number } }
+export interface EditKind { dividend?: { sourceId?: string; usd?: number }; trade?: { amount?: number; fee?: number } }
 
 export function upsertPosition(p: Position, kind?: EditKind) {
   const prev = state.value.positions.find((x) => x.id === p.id);
@@ -167,6 +168,7 @@ export function upsertPosition(p: Position, kind?: EditKind) {
     if (usd > 0.005) state.value = { ...state.value, income: [...state.value.income, { id: uid(), at: new Date().toISOString(), usd: Math.round(usd * 100) / 100, positionId: p.id, sourceId: kind!.dividend!.sourceId, category }] };
   } else addFlows([flowFor(prev, p)]);
   update((s) => ({ ...s, positions: s.positions.some((x) => x.id === p.id) ? s.positions.map((x) => (x.id === p.id ? p : x)) : [...s.positions, p] }));
+  logTrade(prev, p, kind, dividend ? (kind!.dividend!.usd ?? undefined) : undefined);
   if (p.type === 'crypto' || p.type === 'stock') void fetchPrices(state.value).then((prices) => update((s) => ({ ...s, prices })));
   saveSnapshot();
   hooks.dataChanged();
@@ -178,6 +180,53 @@ export const deletePosition = (id: string) => {
   hooks.dataChanged();
 };
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Writes a ledger entry for a change made by hand: a bigger balance is a buy (or a dividend), a smaller one a sale.
+ * Cash balances are not trades. The amount is what you typed, else the cost for a new position, else an estimate from
+ * the current price (marked with `est`).
+ */
+function logTrade(prev: Position | undefined, p: Position, kind?: EditKind, dividendUsd?: number) {
+  if (p.type === 'fiat') return;
+  const delta = p.quantity - (prev?.quantity ?? 0);
+  if (Math.abs(delta) < 1e-12) return;
+  const cur = nativeCur(p);
+  const rates = ratesOf(state.value);
+  const isDividend = !!kind?.dividend && !!prev && delta > 0;
+  const unit = (nativeValue(p, state.value)?.amount ?? 0) / (p.quantity || 1);
+  let amount: number, est = false;
+  const typed = kind?.trade?.amount;
+  if (isDividend) amount = dividendUsd != null ? convert(dividendUsd, 'USD', cur, rates) : delta * unit;
+  else if (typed != null && typed > 0) amount = typed;
+  else if (!prev && p.costBasis != null && p.costBasis > 0) amount = p.costBasis;
+  else { amount = Math.abs(delta) * unit; est = true; }
+  if (!(amount > 0)) return;
+  const fee = isDividend ? undefined : kind?.trade?.fee && kind.trade.fee > 0 ? kind.trade.fee : undefined;
+  const k: TxnKind = isDividend ? 'dividend' : delta > 0 ? 'buy' : 'sell';
+  const net = k === 'buy' ? amount + (fee ?? 0) : amount - (fee ?? 0);
+  addTxn({ at: new Date().toISOString(), positionId: p.id, label: positionLabel(p), kind: k, quantity: Math.abs(delta), amount: round2(amount), cur, fee, usd: round2(convert(net, cur, 'USD', rates)), est: est || undefined });
+}
+
+export function addTxn(t: Omit<Txn, 'id' | 'updatedAt'> & { id?: string }) {
+  const txn: Txn = { ...t, id: t.id ?? uid(), updatedAt: new Date().toISOString() };
+  update((s) => ({ ...s, txns: s.txns.some((x) => x.id === txn.id) ? s.txns.map((x) => (x.id === txn.id ? txn : x)) : [...s.txns, txn] }));
+  hooks.dataChanged();
+}
+
+export function deleteTxn(id: string) {
+  update((s) => ({ ...s, txns: s.txns.filter((x) => x.id !== id), tombstones: { ...s.tombstones, [id]: new Date().toISOString() } }));
+  hooks.dataChanged();
+}
+
+/** Sets a position's cost basis from what the ledger says it cost (average cost of the units still held). */
+export function setCostBasis(positionId: string, cost: number) {
+  const p = state.value.positions.find((x) => x.id === positionId);
+  if (!p) return;
+  update((s) => ({ ...s, positions: s.positions.map((x) => (x.id === positionId ? { ...x, costBasis: round2(cost), updatedAt: new Date().toISOString() } : x)) }));
+  hooks.dataChanged();
+}
+
 export const exportJson = () => JSON.stringify(state.value, null, 2);
 
 /**
@@ -188,6 +237,7 @@ export function replacementState(current: AppState, data: AppState, now = new Da
   const next: AppState = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
   next.flows = next.flows ?? [];
   next.income = next.income ?? [];
+  next.txns = (next.txns ?? []).map((x) => ({ ...x, updatedAt: now }));
   next.snapshots = next.snapshots ?? [];
   next.wallets = next.wallets.map((w) => ({ ...w, updatedAt: now }));
   next.positions = next.positions.map((p) => ({ ...p, updatedAt: now }));
@@ -197,9 +247,10 @@ export function replacementState(current: AppState, data: AppState, now = new Da
   gone(current.positions.map((p) => p.id), new Set(next.positions.map((p) => p.id)));
   gone(current.flows.map((f) => f.id), new Set(next.flows.map((f) => f.id)));
   gone(current.income.map((i) => i.id), new Set(next.income.map((i) => i.id)));
+  gone((current.txns ?? []).map((x) => x.id), new Set(next.txns.map((x) => x.id)));
   gone(current.snapshots.map((x) => snapKey(x.date)), new Set(next.snapshots.map((x) => snapKey(x.date))));
   // What the backup holds is alive again, even if it was deleted earlier.
-  for (const id of [...next.wallets, ...next.positions, ...next.flows, ...next.income].map((x) => x.id)) delete tombstones[id];
+  for (const id of [...next.wallets, ...next.positions, ...next.flows, ...next.income, ...next.txns].map((x) => x.id)) delete tombstones[id];
   for (const x of next.snapshots) delete tombstones[snapKey(x.date)];
   next.tombstones = tombstones;
   return next;

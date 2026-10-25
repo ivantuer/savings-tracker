@@ -26,7 +26,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 
 const local = (): SyncData => {
   const s = state.value;
-  return { wallets: s.wallets, positions: s.positions, snapshots: s.snapshots, tombstones: s.tombstones, flows: s.flows, income: s.income };
+  return { wallets: s.wallets, positions: s.positions, snapshots: s.snapshots, tombstones: s.tombstones, flows: s.flows, income: s.income, txns: s.txns };
 };
 const patch = (p: Partial<ReturnType<typeof syncState.peek>>) => (syncState.value = { ...syncState.value, ...p });
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);

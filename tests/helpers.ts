@@ -8,6 +8,7 @@ export const baseState = (over: Partial<AppState> = {}): AppState => ({
   tombstones: {},
   flows: [],
   income: [],
+  txns: [],
   settings: { display: 'USD', finnhubKey: '', hideBalances: false, uahRate: 'nbu', theme: 'auto' },
   rates: { usdUah: 40, eurUah: 44, usdtUah: 40, usdtUsd: 1 },
   prices: { crypto: {}, stocks: {} },

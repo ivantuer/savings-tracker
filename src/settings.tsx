@@ -48,6 +48,12 @@ export function SettingsView() {
         </div>
       </div>
       <div class="card">
+        <h2>Inflation</h2>
+        <p class="muted small">Expected yearly hryvnia inflation, used for the after-inflation line in Real return. Leave blank to hide it. Enter the figure you trust (for example from the NBU).</p>
+        <label>Inflation, % a year</label>
+        <input inputMode="decimal" value={s.settings.inflationPct ?? ''} placeholder="e.g. 8" onInput={(e) => { const v = Number(e.currentTarget.value.replace(',', '.')); setSettings({ inflationPct: e.currentTarget.value.trim() === '' || Number.isNaN(v) ? undefined : v }); }} />
+      </div>
+      <div class="card">
         <h2>Stock prices</h2>
         <p class="muted small">Crypto uses CoinGecko, UAH rates use NBU and Binance (no keys). Stocks need a free Finnhub API key; without one the manual price is used. The key stays on this device.</p>
         <label>Finnhub API key</label>

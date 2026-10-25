@@ -5,16 +5,23 @@ import { fmt, netWorth, walletTotal } from './calc';
 import { Dashboard } from './dashboard';
 import { PricesView } from './prices';
 import { DailyView } from './daily';
+import { TradesView } from './trades';
 import { WalletView } from './wallet';
 import { WalletForm } from './forms';
 import { SettingsView } from './settings';
 
 type Tab = 'overview' | 'daily' | 'wallets' | 'prices' | 'settings';
+const LABEL: Record<Tab, string> = { overview: 'Overview', daily: 'Activity', wallets: 'Wallets', prices: 'Prices', settings: 'Settings' };
+
+type Activity = 'daily' | 'trades';
+const savedActivity = (): Activity => { try { return localStorage.getItem('activity-view') === 'trades' ? 'trades' : 'daily'; } catch { return 'daily'; } };
 
 export function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [walletId, setWalletId] = useState<string | null>(null);
   const [addingWallet, setAddingWallet] = useState(false);
+  const [activity, setActivity] = useState<Activity>(savedActivity);
+  const pickActivity = (a: Activity) => { setActivity(a); try { localStorage.setItem('activity-view', a); } catch { /* not available */ } };
   const scroller = useRef<HTMLDivElement>(null);
   // A new screen starts at the top. Otherwise a short screen inherits the long one's scroll position and jumps.
   useEffect(() => { scroller.current?.scrollTo(0, 0); }, [tab, walletId]);
@@ -72,7 +79,15 @@ export function App() {
         </>
       )}
 
-      {tab === 'daily' && <DailyView />}
+      {tab === 'daily' && (
+        <>
+          <div class="seg" style="display:flex;margin-bottom:12px">
+            <button style="flex:1" class={activity === 'daily' ? 'on' : ''} onClick={() => pickActivity('daily')}>Daily</button>
+            <button style="flex:1" class={activity === 'trades' ? 'on' : ''} onClick={() => pickActivity('trades')}>Trades</button>
+          </div>
+          {activity === 'daily' ? <DailyView /> : <TradesView />}
+        </>
+      )}
       {tab === 'prices' && <PricesView />}
       {tab === 'settings' && <SettingsView />}
 
@@ -83,7 +98,7 @@ export function App() {
       <nav class="tabs">
         {(['overview', 'daily', 'wallets', 'prices', 'settings'] as Tab[]).map((t) => (
           <button class={tab === t ? 'on' : ''} onClick={() => { setTab(t); if (t !== 'wallets') setWalletId(null); }}>
-            {t[0].toUpperCase() + t.slice(1)}
+            {LABEL[t]}
           </button>
         ))}
       </nav>

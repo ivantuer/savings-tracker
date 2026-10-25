@@ -1,5 +1,5 @@
 // Encrypted sync with the Savings Tracker Worker. Pure functions (no DOM, no UI state) so they can be tested in Node.
-import type { Flow, Income, Position, Snapshot, Wallet } from './types';
+import type { Flow, Income, Position, Snapshot, Txn, Wallet } from './types';
 
 export interface SyncData {
   wallets: Wallet[];
@@ -8,6 +8,7 @@ export interface SyncData {
   tombstones: Record<string, string>;
   flows: Flow[];
   income: Income[];
+  txns: Txn[];
 }
 
 /** The data key (`key`), encrypted under the passkey-derived key, so another device with the same passkey can open the vault. */
@@ -68,7 +69,7 @@ export async function decrypt(v: Vault, iv: string, blob: string): Promise<SyncD
   try {
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, await aes(v.key), unb64(blob));
     const d = JSON.parse(td.decode(pt)) as Partial<SyncData>;
-    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {}, flows: d.flows ?? [], income: d.income ?? [] };
+    return { wallets: d.wallets ?? [], positions: d.positions ?? [], snapshots: d.snapshots ?? [], tombstones: d.tombstones ?? {}, flows: d.flows ?? [], income: d.income ?? [], txns: d.txns ?? [] };
   } catch {
     throw new Error('Could not decrypt the synced data');
   }
@@ -123,7 +124,8 @@ export function mergeData(a: SyncData, b: SyncData, now = Date.now()): SyncData 
     .sort((x, y) => x.date.localeCompare(y.date));
   const flows = byKey(a.flows ?? [], b.flows ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at));
   const income = byKey(a.income ?? [], b.income ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at));
-  return { wallets, positions, snapshots, tombstones, flows, income };
+  const txns = byKey(a.txns ?? [], b.txns ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at) || x.id.localeCompare(y.id));
+  return { wallets, positions, snapshots, tombstones, flows, income, txns };
 }
 
 /** Stable form for comparing two datasets regardless of ordering. */
@@ -136,6 +138,7 @@ export function canon(d: SyncData): string {
     t: Object.entries(d.tombstones).sort(),
     f: sortBy(d.flows ?? [], (x) => x.id),
     i: sortBy(d.income ?? [], (x) => x.id),
+    x: sortBy(d.txns ?? [], (x) => x.id),
   });
 }
 

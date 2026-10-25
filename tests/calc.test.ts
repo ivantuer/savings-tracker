@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { convert, creditRows, dailyRows, dividendStats, exposure, localDate, netWorth, periodChange, ratesOf, takeSnapshot, addDays, categoryTotals } from '../src/calc';
+import { chainReturn, realReturn, spreadFromPrice, convert, creditRows, dailyRows, dividendStats, exposure, localDate, netWorth, periodChange, ratesOf, takeSnapshot, addDays, categoryTotals } from '../src/calc';
 import type { Position, Snapshot } from '../src/types';
 import { baseState, fiat, wallet } from './helpers';
 
@@ -139,5 +139,90 @@ describe('bond spread', () => {
     const s = baseState({ wallets: [wallet('o', 'ovdp')], positions: [{ ...bond(2), bond: { face: 1000, unitValue: 1100, spreadPct: 2 } }] });
     expect(creditRows(s, 'UAH')[0].value).toBeCloseTo(107800);
     expect(creditRows(withPrice(bond(-5)), 'UAH')[0].value).toBeCloseTo(120000);
+  });
+});
+
+describe('spreadFromPrice', () => {
+  it('turns a bank price into a spread that reproduces it', () => {
+    const sp = spreadFromPrice(1200, 1188)!;
+    expect(sp).toBeCloseTo(1);
+    expect(1200 * (1 - sp / 100)).toBeCloseTo(1188, 2);
+  });
+  it('rejects prices that make no sense', () => {
+    expect(spreadFromPrice(1200, 0)).toBeUndefined();
+    expect(spreadFromPrice(1200, 1300)).toBeUndefined();
+    expect(spreadFromPrice(0, 100)).toBeUndefined();
+  });
+});
+
+describe('realReturn', () => {
+  const sn = (date: string, usd: number, rate: number): Snapshot => ({ date, usd, uah: usd * rate, usdt: usd, byCategory: { cash: usd } });
+  const flat = (extra: Partial<ReturnType<typeof baseState>> = {}) => baseState({
+    snapshots: [sn('2025-10-01', 1000, 40), sn('2026-04-01', 1000, 42), sn('2026-10-01', 1000, 44)], ...extra,
+  });
+
+  it('shows plain dollars matching the hryvnia fall, and no gain measured in dollars', () => {
+    const rr = realReturn(flat(), 'All')!;
+    expect(rr.since).toBe('2025-10-01');
+    expect(rr.days).toBe(365);
+    expect(rr.fx).toBeCloseTo(0.1);
+    expect(rr.uah).toBeCloseTo(0.1);
+    expect(rr.usd).toBeCloseTo(0);
+    expect(rr.inflation).toBeUndefined();
+    expect(rr.realUah).toBeUndefined();
+    expect(rr.annualUah).toBeCloseTo(0.1, 3);
+  });
+
+  it('leaves a deposit out of the return', () => {
+    const s = baseState({
+      snapshots: [sn('2025-10-01', 1000, 40), sn('2026-04-01', 1000, 42), { ...sn('2026-10-01', 1500, 44), at: '2026-10-01T20:00:00Z' }],
+      flows: [{ id: 'f', at: '2026-10-01T09:00:00Z', usd: 500, positionId: 'a' }],
+    });
+    const rr = realReturn(s, 'All')!;
+    expect(rr.uah).toBeCloseTo(0.1);
+    expect(rr.usd).toBeCloseTo(0);
+  });
+
+  it('measures a real gain in dollars too', () => {
+    const s = baseState({ snapshots: [sn('2025-10-01', 1000, 40), sn('2026-10-01', 1100, 44)] });
+    const rr = realReturn(s, 'All')!;
+    expect(rr.usd).toBeCloseTo(0.1);
+    expect(rr.uah).toBeCloseTo(0.21);
+    expect(rr.fx).toBeCloseTo(0.1);
+  });
+
+  it('takes inflation off the hryvnia return', () => {
+    const base = flat();
+    const rr = realReturn({ ...base, settings: { ...base.settings, inflationPct: 10 } }, 'All')!;
+    expect(rr.inflation).toBeCloseTo(0.1, 3);
+    expect(rr.realUah).toBeCloseTo(0, 2);
+    const low = realReturn({ ...base, settings: { ...base.settings, inflationPct: 5 } }, 'All')!;
+    expect(low.realUah).toBeCloseTo(1.1 / 1.05 - 1, 3);
+  });
+
+  it('ignores a zero or empty inflation setting', () => {
+    const base = flat();
+    expect(realReturn({ ...base, settings: { ...base.settings, inflationPct: 0 } }, 'All')!.inflation).toBeUndefined();
+  });
+
+  it('gives no yearly figure for a short period', () => {
+    const s = baseState({ snapshots: [sn('2026-10-01', 1000, 40), sn('2026-10-11', 1000, 41)] });
+    const rr = realReturn(s, 'All')!;
+    expect(rr.days).toBe(10);
+    expect(rr.annualUah).toBeUndefined();
+    expect(rr.annualUsd).toBeUndefined();
+  });
+
+  it('is null with fewer than two snapshots', () => {
+    expect(realReturn(baseState(), 'All')).toBeNull();
+    expect(realReturn(baseState({ snapshots: [sn('2026-10-01', 1000, 40)] }), 'All')).toBeNull();
+  });
+});
+
+describe('chainReturn', () => {
+  it('compounds daily percentages', () => {
+    expect(chainReturn([{ plPct: 10 }, { plPct: 10 }])).toBeCloseTo(0.21);
+    expect(chainReturn([{ plPct: 10 }, { plPct: -10 }])).toBeCloseTo(-0.01);
+    expect(chainReturn([])).toBe(0);
   });
 });
