@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportJson, importJson, setSettings, state } from './store';
-import { monoMid } from './calc';
+import { localDate, monoMid } from './calc';
 import { connectGoogle, connectPasskey, disableGoogleBackup, disconnect, enableGoogleBackup, syncNow, syncState } from './sync';
 import { passkeysAvailable, prfCapability } from './passkey';
 import { renderGoogleButton } from './google';
@@ -13,7 +13,7 @@ export function SettingsView() {
 
   const download = () => {
     const url = URL.createObjectURL(new Blob([exportJson()], { type: 'application/json' }));
-    const a = Object.assign(document.createElement('a'), { href: url, download: `savings-backup-${new Date().toISOString().slice(0, 10)}.json` });
+    const a = Object.assign(document.createElement('a'), { href: url, download: `savings-backup-${localDate()}.json` });
     a.click();
     URL.revokeObjectURL(url);
   };

@@ -2,6 +2,7 @@ import { signal, effect } from '@preact/signals';
 import { get, set } from 'idb-keyval';
 import type { AppState, Flow, Income, Position, Wallet } from './types';
 import { DEFAULT_RATES, fetchLog, fetchPrices, fetchRates } from './rates';
+import { snapKey } from './sync-core';
 import { counts, nativeValue, positionValue, takeSnapshot } from './calc';
 
 const KEY = 'savings-tracker-state';
@@ -91,16 +92,19 @@ export async function refresh() {
   refreshing.value = true;
   refreshError.value = '';
   fetchLog.length = 0;
+  let complete = false;
   try {
     const rates = await fetchRates(state.value.rates);
     update((s) => ({ ...s, rates }));
     const prices = await fetchPrices(state.value);
     update((s) => ({ ...s, prices, rates: { ...s.rates, usdtUsd: prices.crypto.tether ?? s.rates.usdtUsd } }));
+    complete = fetchLog.length === 0;
   } catch (e) {
     refreshError.value = e instanceof Error ? e.message : 'Refresh failed';
   } finally {
     if (fetchLog.length) refreshError.value = fetchLog.join('; ');
-    saveSnapshot();
+    // A snapshot built on stale prices would show a flat day and then one big jump, so only a full refresh records one.
+    if (complete) saveSnapshot();
     refreshing.value = false;
   }
 }
@@ -175,10 +179,36 @@ export const deletePosition = (id: string) => {
 };
 
 export const exportJson = () => JSON.stringify(state.value, null, 2);
+
+/**
+ * The state after replacing `current` with a backup. Whatever the backup lacks gets a tombstone, so the next sync does
+ * not bring it back from the server, and what it holds is stamped now so it beats the server's older copy.
+ */
+export function replacementState(current: AppState, data: AppState, now = new Date().toISOString()): AppState {
+  const next: AppState = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
+  next.flows = next.flows ?? [];
+  next.income = next.income ?? [];
+  next.snapshots = next.snapshots ?? [];
+  next.wallets = next.wallets.map((w) => ({ ...w, updatedAt: now }));
+  next.positions = next.positions.map((p) => ({ ...p, updatedAt: now }));
+  const tombstones: Record<string, string> = { ...current.tombstones };
+  const gone = (ids: string[], keep: Set<string>) => { for (const id of ids) if (!keep.has(id)) tombstones[id] = now; };
+  gone(current.wallets.map((w) => w.id), new Set(next.wallets.map((w) => w.id)));
+  gone(current.positions.map((p) => p.id), new Set(next.positions.map((p) => p.id)));
+  gone(current.flows.map((f) => f.id), new Set(next.flows.map((f) => f.id)));
+  gone(current.income.map((i) => i.id), new Set(next.income.map((i) => i.id)));
+  gone(current.snapshots.map((x) => snapKey(x.date)), new Set(next.snapshots.map((x) => snapKey(x.date))));
+  // What the backup holds is alive again, even if it was deleted earlier.
+  for (const id of [...next.wallets, ...next.positions, ...next.flows, ...next.income].map((x) => x.id)) delete tombstones[id];
+  for (const x of next.snapshots) delete tombstones[snapKey(x.date)];
+  next.tombstones = tombstones;
+  return next;
+}
+
 export function importJson(text: string) {
   const data = JSON.parse(text) as AppState;
   if (!Array.isArray(data.wallets) || !Array.isArray(data.positions)) throw new Error('Not a Savings Tracker backup');
-  state.value = { ...empty(), ...data, settings: { ...empty().settings, ...data.settings } };
+  state.value = replacementState(state.value, data);
   hooks.dataChanged();
   void refresh();
 }

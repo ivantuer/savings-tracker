@@ -2,6 +2,10 @@ import type { AppState, Category, Display, Fiat, Position, Rates, Snapshot, Wall
 
 type Cur = Fiat | 'USDT';
 
+/** Local calendar date (YYYY-MM-DD). The UTC date would roll the day over at 02:00-03:00 in Kyiv. */
+export const localDate = (d: Date = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 /** Monobank mid-rate (between its buy and sell quotes), UAH per USD / EUR. */
 export const monoMid = (s: AppState) => s.rates.mono && { usd: (s.rates.mono.usdBuy + s.rates.mono.usdSell) / 2, eur: (s.rates.mono.eurBuy + s.rates.mono.eurSell) / 2 };
 
@@ -97,7 +101,7 @@ export const netWorth = (s: AppState, to: Display) =>
 
 export function takeSnapshot(s: AppState): Snapshot {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: localDate(),
     at: new Date().toISOString(),
     usd: netWorth(s, 'USD'),
     uah: netWorth(s, 'UAH'),
@@ -133,7 +137,7 @@ export const daysUntil = (iso: string) => Math.ceil((new Date(`${iso}T23:59:59`)
 export const addDays = (iso: string, n: number) => {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localDate(d);
 };
 
 export interface CreditRow { position: Position; value: number; owed: number; days: number }
@@ -236,7 +240,7 @@ export function adjustedSnapshots(s: AppState): Snapshot[] {
 export function snapshotsIn(s: AppState, r: Range): Snapshot[] {
   const all = adjustedSnapshots(s);
   if (r === 'All') return all;
-  const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
+  const from = localDate(new Date(Date.now() - rangeDays[r] * 86_400_000));
   const inside = all.filter((x) => x.date >= from);
   const before = all.filter((x) => x.date < from).at(-1);
   return before ? [before, ...inside] : inside;
@@ -249,7 +253,7 @@ export function snapshotsIn(s: AppState, r: Range): Snapshot[] {
 export function periodChange(s: AppState, to: Display, r: Range) {
   const snaps = snapshotsIn(s, r);
   const base = snaps[0];
-  if (!base || base.date === new Date().toISOString().slice(0, 10)) return null;
+  if (!base || base.date === localDate()) return null;
   const was = snapshotValue(base, to);
   const rates = ratesOf(s);
   const flow = s.flows
@@ -391,7 +395,7 @@ export function partTotals(rows: ViewRow[]): Part[] {
 
 export function rowsIn<T extends { date: string }>(rows: T[], r: Range): T[] {
   if (r === 'All') return rows;
-  const from = new Date(Date.now() - rangeDays[r] * 86_400_000).toISOString().slice(0, 10);
+  const from = localDate(new Date(Date.now() - rangeDays[r] * 86_400_000));
   return rows.filter((x) => x.date >= from);
 }
 

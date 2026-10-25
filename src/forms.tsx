@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { CATEGORIES, type Category, type Fiat, type Position, type PositionType, type Wallet } from './types';
 import { deleteWallet, deletePosition, recordDividend, state, uid, upsertPosition, upsertWallet } from './store';
-import { addDays } from './calc';
+import { addDays, localDate } from './calc';
 import { fetchBondQuotes, INZHUR_FUNDS, QUICK_COINS, searchCoins, type CoinHit } from './rates';
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
@@ -69,7 +69,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [onCredit, setOnCredit] = useState(!!position?.credit);
   const [bank, setBank] = useState(position?.credit?.bank ?? '');
   const [owed, setOwed] = useState(position?.credit ? String(position.credit.owed) : '');
-  const [boughtOn, setBoughtOn] = useState(position?.credit?.boughtOn ?? new Date().toISOString().slice(0, 10));
+  const [boughtOn, setBoughtOn] = useState(position?.credit?.boughtOn ?? localDate());
   const [sellBy, setSellBy] = useState(position?.credit?.sellBy ?? '');
   const [hits, setHits] = useState<CoinHit[]>(QUICK_COINS);
   const [q, setQ] = useState('');

@@ -1,4 +1,5 @@
 import type { Position } from './types';
+import { localDate } from './calc';
 
 /** All-day calendar event on the sell-by date, with alerts 7, 3 and 1 day before. */
 export function downloadSellReminder(p: Position) {
@@ -6,7 +7,7 @@ export function downloadSellReminder(p: Position) {
   const day = p.credit.sellBy.replace(/-/g, '');
   const next = new Date(`${p.credit.sellBy}T12:00:00`);
   next.setDate(next.getDate() + 1);
-  const end = next.toISOString().slice(0, 10).replace(/-/g, '');
+  const end = localDate(next).replace(/-/g, '');
   const alarm = (d: number) =>
     `BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Sell ${p.name} in ${d} day(s)\r\nTRIGGER:-P${d}D\r\nEND:VALARM`;
   const lines = [

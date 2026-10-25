@@ -210,14 +210,16 @@ export async function fetchPrices(s: AppState): Promise<Prices> {
       tasks.push(
         j<{ c: number }>(
           `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(t)}&token=${s.settings.finnhubKey}`,
-        ).then((r) => {
-          if (r.c) next.stocks[t] = r.c;
-        }),
+        ).then(
+          (r) => { if (r.c) next.stocks[t] = r.c; else fail(`Finnhub ${t}`, new Error('no price (check the ticker)')); },
+          (e) => fail(`Finnhub ${t}`, e),
+        ),
       );
     }
   }
   if (s.positions.some((p) => p.type === 'manual' && p.symbol)) {
     tasks.push(fetchInzhur().then((r) => {
+      if (!Object.keys(r).length) return fail('Inzhur funds', new Error('no prices found on the page (its layout may have changed)'));
       next.inzhurBuy = {};
       for (const [key, q] of Object.entries(r)) {
         next.inzhur![key] = q.sell ?? q.buy * (1 - (FUND_SPREAD[key] ?? 0));   // value at what a sale would pay, like Inzhur's own app

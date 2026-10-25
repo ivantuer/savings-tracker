@@ -26,7 +26,12 @@ export class SyncAuthError extends Error {}
 const te = new TextEncoder();
 const td = new TextDecoder();
 const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
-const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+/** Chunked: spreading a large array into fromCharCode overflows the call stack (Safari allows about 65k arguments). */
+export const b64 = (b: Uint8Array) => {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+};
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const base = (url: string) => url.replace(/\/+$/, '');
 
@@ -90,8 +95,21 @@ function byKey<T extends { updatedAt?: string; at?: string }>(a: T[], b: T[], ke
   return [...out.values()];
 }
 
+/** Snapshots older than this lose their per-position values, which are the bulk of the vault. */
+export const KEEP_POSITION_DAYS = 180;
+
+/** Deterministic, so every device compacts the same way and they still converge. */
+function compact(s: Snapshot, now: number): Snapshot {
+  if (!s.byPosition || now - new Date(`${s.date}T12:00:00Z`).getTime() < KEEP_POSITION_DAYS * 86_400_000) return s;
+  const { byPosition: _drop, ...rest } = s;
+  return rest;
+}
+
+/** Tombstone key of a snapshot, used when a backup import replaces everything. */
+export const snapKey = (date: string) => `snap:${date}`;
+
 /** Commutative and idempotent: merge(a, b) equals merge(b, a), so two devices always end up identical. */
-export function mergeData(a: SyncData, b: SyncData): SyncData {
+export function mergeData(a: SyncData, b: SyncData, now = Date.now()): SyncData {
   const tombstones: Record<string, string> = { ...a.tombstones };
   for (const [id, at] of Object.entries(b.tombstones)) if (!tombstones[id] || at > tombstones[id]) tombstones[id] = at;
   // A deletion beats a record unless the record was edited after it was deleted.
@@ -99,8 +117,11 @@ export function mergeData(a: SyncData, b: SyncData): SyncData {
   const wallets = byKey(a.wallets, b.wallets, (w) => w.id).filter(alive);
   const ids = new Set(wallets.map((w) => w.id));
   const positions = byKey(a.positions, b.positions, (p) => p.id).filter(alive).filter((p) => ids.has(p.walletId));
-  const snapshots = byKey(a.snapshots, b.snapshots, (s) => s.date).sort((x, y) => x.date.localeCompare(y.date));
-  const flows = byKey(a.flows ?? [], b.flows ?? [], (x) => x.id).sort((x, y) => x.at.localeCompare(y.at));
+  const snapshots = byKey(a.snapshots, b.snapshots, (s) => s.date)
+    .filter((s) => !tombstones[snapKey(s.date)] || (s.at ?? '') > tombstones[snapKey(s.date)])
+    .map((s) => compact(s, now))
+    .sort((x, y) => x.date.localeCompare(y.date));
+  const flows = byKey(a.flows ?? [], b.flows ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at));
   const income = byKey(a.income ?? [], b.income ?? [], (x) => x.id).filter((x) => !tombstones[x.id]).sort((x, y) => x.at.localeCompare(y.at));
   return { wallets, positions, snapshots, tombstones, flows, income };
 }
