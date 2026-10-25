@@ -28,7 +28,7 @@ export interface Position {
   /** manual (Inzhur): current price of one certificate; blank means quantity is the total value */
   unitPrice?: number;
   /** bond: current value of one bond (defaults to face) */
-  bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string; isin?: string };
+  bond?: { face: number; unitValue: number; couponRate?: number; maturity?: string; isin?: string; /** % taken off the price for the spread when selling through your broker (e.g. Privat24 buys back below the catalog price) */ spreadPct?: number };
   /** bond bought with borrowed money (e.g. a credit-card grace period) that must be sold by a date */
   credit?: { bank?: string; owed: number; boughtOn?: string; sellBy: string };
   /** total cost in the position's native currency (USD for crypto/stock), optional */

@@ -125,3 +125,19 @@ describe('dividendStats', () => {
     expect(d.avgPerMonth).toBeCloseTo(2.5);
   });
 });
+
+describe('bond spread', () => {
+  const bond = (spreadPct?: number): Position => ({ id: 'b', walletId: 'o', type: 'bond', name: 'b', quantity: 100, currency: 'UAH', bond: { face: 1000, unitValue: 1100, isin: 'UA4000X', spreadPct }, credit: { owed: 100000, sellBy: '2027-01-01' }, updatedAt: '' });
+  const withPrice = (p: Position) => baseState({ wallets: [wallet('o', 'ovdp')], positions: [p], prices: { crypto: {}, stocks: {}, bonds: { UA4000X: { sell: 1200, buy: 1210 } } } });
+
+  it('takes the spread off the live price', () => {
+    expect(creditRows(withPrice(bond(0)), 'UAH')[0].value).toBeCloseTo(120000);
+    expect(creditRows(withPrice(bond(1)), 'UAH')[0].value).toBeCloseTo(118800);
+  });
+
+  it('applies to the manual value too, and ignores nonsense', () => {
+    const s = baseState({ wallets: [wallet('o', 'ovdp')], positions: [{ ...bond(2), bond: { face: 1000, unitValue: 1100, spreadPct: 2 } }] });
+    expect(creditRows(s, 'UAH')[0].value).toBeCloseTo(107800);
+    expect(creditRows(withPrice(bond(-5)), 'UAH')[0].value).toBeCloseTo(120000);
+  });
+});

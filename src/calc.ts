@@ -39,10 +39,14 @@ export function unitPriceOf(p: Position, s: AppState): number | undefined {
   return live ?? p.unitPrice;
 }
 
-/** Value of one bond: the live sell price from the Inzhur catalog (by ISIN), else the manual value, else face. */
+/**
+ * Value of one bond: the live sell price from the Inzhur catalog (by ISIN), else the manual value, else face, less the
+ * spread your broker takes when you sell.
+ */
 export function bondUnitValue(p: Position, s: AppState): number | undefined {
   const live = p.bond?.isin ? s.prices.bonds?.[p.bond.isin.toUpperCase()]?.sell : undefined;
-  return live ?? p.bond?.unitValue ?? p.bond?.face;
+  const base = live ?? p.bond?.unitValue ?? p.bond?.face;
+  return base == null ? undefined : base * (1 - Math.min(Math.max(p.bond?.spreadPct ?? 0, 0), 100) / 100);
 }
 
 /** Value of a position in its native currency, or null when no price is available. */

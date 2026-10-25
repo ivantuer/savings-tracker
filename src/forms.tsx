@@ -63,6 +63,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
   const [lookupMsg, setLookupMsg] = useState('');
   const [coupon, setCoupon] = useState(position?.bond?.couponRate != null ? String(position.bond.couponRate) : '');
   const [maturity, setMaturity] = useState(position?.bond?.maturity ?? '');
+  const [spread, setSpread] = useState(position?.bond?.spreadPct != null ? String(position.bond.spreadPct) : '');
   const [kind, setKind] = useState<'buy' | 'dividend'>('buy');
   const [sourceId, setSourceId] = useState('');
   const [divAmount, setDivAmount] = useState('');
@@ -115,7 +116,7 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
       currency: type === 'crypto' || type === 'stock' ? undefined : cur,
       manualPrice: type === 'stock' ? num(manualPrice) : undefined,
       unitPrice: type === 'manual' ? num(unitPrice) : undefined,
-      bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined, isin: isin.trim().toUpperCase() || undefined } : undefined,
+      bond: type === 'bond' ? { face: faceN, unitValue: num(unitValue) ?? faceN, couponRate: num(coupon), maturity: maturity || undefined, spreadPct: num(spread) || undefined, isin: isin.trim().toUpperCase() || undefined } : undefined,
       credit: type === 'bond' && onCredit ? { bank: bank.trim() || undefined, owed: num(owed) ?? num(cost) ?? 0, boughtOn: boughtOn || undefined, sellBy } : undefined,
       costBasis: num(cost),
       history: position?.history,
@@ -203,6 +204,12 @@ export function PositionForm({ wallet, position, onClose, onDeleted }: { wallet:
           <input inputMode="decimal" value={face} onInput={(e) => setFace(e.currentTarget.value)} />
           <label>{isin ? 'Fallback value' : 'Current value'} per bond (face + accrued; blank = face)</label>
           <input inputMode="decimal" value={unitValue} onInput={(e) => setUnitValue(e.currentTarget.value)} />
+          <label>Sale spread, % (what your broker takes off when you sell)</label>
+          <input inputMode="decimal" value={spread} placeholder="0" onInput={(e) => setSpread(e.currentTarget.value)} />
+          {(() => {
+            const q = num(qty), unit = isin && state.value.prices.bonds?.[isin.trim().toUpperCase()]?.sell || num(unitValue) || num(face) || 0, sp = num(spread) ?? 0;
+            return q && sp > 0 ? <p class="muted small" style="margin:6px 0 0">About {cur === 'UAH' ? '₴' : ''}{Math.round(q * unit * sp / 100).toLocaleString('en-US')} {cur !== 'UAH' ? cur : ''}off the total. Compare with the price your bank shows for selling and adjust.</p> : <p class="muted small" style="margin:6px 0 0">Optional. Without it the value is the catalog sell price, which is above what a bank like Privat24 pays.</p>;
+          })()}
           <label>Coupon rate, % per year</label>
           <input inputMode="decimal" value={coupon} onInput={(e) => setCoupon(e.currentTarget.value)} />
           <label>Maturity date</label>
