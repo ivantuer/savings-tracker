@@ -48,6 +48,8 @@ h1, h2, h3 { margin: 0; }
 h2 { font-size: 14px; font-weight: 600; letter-spacing: .01em; margin-bottom: 12px; }
 .muted { color: var(--muted); } .small { font-size: 13px; } .num { font-variant-numeric: tabular-nums; }
 .row { display: flex; align-items: center; gap: 10px; } .between { justify-content: space-between; }
+/* Each blurred card is its own stacking layer, so a chart tooltip would slide under the next card; lift the card that shows one. */
+.card:has(.tip) { position: relative; z-index: 4; }
 .card { background: var(--glass); border: 1px solid var(--ring); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; }
 .seg { display: inline-flex; background: var(--field); border: 1px solid var(--ring); border-radius: 999px; padding: 3px; }
